@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.WindowInsets
@@ -128,7 +129,8 @@ fun DeviceScreen(
     // The message field is the last card of the Board tab: when the keyboard opens, scroll it and
     // the Send button into the space the keyboard left.
     val keyboardOpen = WindowInsets.isImeVisible
-    LaunchedEffect(keyboardOpen, tab) { if (keyboardOpen && tab == DeviceTab.Board) scroll.animateScrollTo(scroll.maxValue) }
+    // maxValue is a key because the area only gets its final height after the keyboard has resized it.
+    LaunchedEffect(keyboardOpen, tab, scroll.maxValue) { if (keyboardOpen && tab == DeviceTab.Board) scroll.animateScrollTo(scroll.maxValue) }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -146,8 +148,9 @@ fun DeviceScreen(
             )
         },
     ) { padding ->
-        // Scaffold consumes the system bars; imePadding adds only what the keyboard takes beyond them.
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        // padding() alone does not mark the bars as used, so imePadding would add the navigation bar
+        // a second time (an empty strip above the keyboard). consumeWindowInsets fixes that.
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             PrimaryTabRow(selectedTabIndex = tab.ordinal) {
                 DeviceTab.entries.forEach { entry ->
                     Tab(
