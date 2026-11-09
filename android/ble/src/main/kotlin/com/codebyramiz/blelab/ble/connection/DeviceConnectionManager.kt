@@ -10,10 +10,16 @@ import com.codebyramiz.blelab.ble.model.DeviceInfo
 import com.codebyramiz.blelab.ble.model.MotionSample
 import com.codebyramiz.blelab.ble.model.Telemetry
 import com.codebyramiz.blelab.ble.model.TouchEvent
+import com.codebyramiz.blelab.ble.ota.FirmwareImage
+import com.codebyramiz.blelab.ble.ota.OtaLink
+import com.codebyramiz.blelab.ble.ota.OtaProgress
+import com.codebyramiz.blelab.ble.ota.OtaUpdater
 import com.codebyramiz.blelab.ble.protocol.GattProfile
 import com.codebyramiz.blelab.ble.protocol.GattStatus
 import com.codebyramiz.blelab.ble.protocol.MessageCodec
 import com.codebyramiz.blelab.ble.protocol.MotionCodec
+import com.codebyramiz.blelab.ble.protocol.OtaProtocol
+import com.codebyramiz.blelab.ble.protocol.OtaStatus
 import com.codebyramiz.blelab.ble.protocol.TelemetryCodec
 import com.codebyramiz.blelab.ble.protocol.TouchCodec
 import kotlinx.coroutines.CancellationException
@@ -23,12 +29,14 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -62,6 +70,8 @@ class DeviceConnectionManager(
     /** Touches on the board's screen. */
     val touches: SharedFlow<TouchEvent> = _touches.asSharedFlow()
 
+    private val otaStatusEvents = MutableSharedFlow<OtaStatus>(extraBufferCapacity = 16)
+
     private var connectionJob: Job? = null
 
     @Volatile
@@ -89,6 +99,28 @@ class DeviceConnectionManager(
     suspend fun sendMessage(text: String): Result<Unit> {
         val payload = MessageCodec.encode(text) ?: return Result.failure(IllegalArgumentException("Message is blank"))
         return write(GattProfile.MESSAGE, payload)
+    }
+
+    /**
+     * Streams [image] to the board. Only valid while [ConnectionState.Ready] with
+     * [ConnectionState.Ready.otaSupported]; otherwise the flow fails at once. When the board
+     * accepts the image it restarts, the link drops, and this manager reconnects on its own,
+     * so the new firmware revision shows up in the next [ConnectionState.Ready].
+     */
+    fun updateFirmware(image: FirmwareImage): Flow<OtaProgress> {
+        val client = activeClient
+        val ready = _state.value as? ConnectionState.Ready
+        if (client == null || ready == null) return flowOf(OtaProgress.Failed(BleError.NotConnected.message))
+        if (!ready.otaSupported) return flowOf(OtaProgress.Failed("This firmware has no update service; flash 1.2.0 over USB once"))
+        val link = object : OtaLink {
+            override val status: Flow<OtaStatus> = otaStatusEvents
+            override suspend fun writeControl(value: ByteArray) = withBonding(client, ready.address) {
+                client.write(GattProfile.OTA_SERVICE, GattProfile.OTA_CONTROL, value)
+            }
+
+            override suspend fun writeData(value: ByteArray) = client.writeWithoutResponse(GattProfile.OTA_SERVICE, GattProfile.OTA_DATA, value)
+        }
+        return OtaUpdater(link, ready.mtu).update(image)
     }
 
     private suspend fun write(characteristic: UUID, payload: ByteArray): Result<Unit> {
@@ -189,8 +221,12 @@ class DeviceConnectionManager(
             }
         }
 
+        // The OTA status notifications drive the transfer's flow control. Without the service this is skipped.
+        val otaSupported = GattProfile.OTA_SERVICE in services
+        if (otaSupported) withBonding(client, address) { client.enableNotifications(GattProfile.OTA_SERVICE, GattProfile.OTA_STATUS) }
+
         activeClient = client
-        _state.value = ConnectionState.Ready(address, info, mtu)
+        _state.value = ConnectionState.Ready(address, info, mtu, otaSupported)
         onReady()
 
         val status = disconnected.await()
@@ -203,6 +239,7 @@ class DeviceConnectionManager(
             GattProfile.TELEMETRY -> runCatching { TelemetryCodec.decode(event.value) }.onSuccess { _telemetry.tryEmit(it) }
             GattProfile.MOTION -> runCatching { MotionCodec.decode(event.value) }.onSuccess { batch -> batch.forEach { _motion.tryEmit(it) } }
             GattProfile.TOUCH -> runCatching { TouchCodec.decode(event.value) }.getOrNull()?.let { _touches.tryEmit(it) }
+            GattProfile.OTA_STATUS -> OtaProtocol.decodeStatus(event.value)?.let { otaStatusEvents.tryEmit(it) }
         }
     }
 

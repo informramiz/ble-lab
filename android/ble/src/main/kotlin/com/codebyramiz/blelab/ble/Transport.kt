@@ -57,6 +57,13 @@ interface GattClient {
 
     suspend fun write(service: UUID, characteristic: UUID, value: ByteArray)
 
+    /**
+     * Write without response: returns once the stack has accepted [value] for transmission,
+     * not when the peripheral has it. Callers must pace themselves (the OTA transfer does,
+     * with the board's status notifications).
+     */
+    suspend fun writeWithoutResponse(service: UUID, characteristic: UUID, value: ByteArray)
+
     suspend fun enableNotifications(service: UUID, characteristic: UUID)
 
     /** Starts system pairing and suspends until the device is bonded. */

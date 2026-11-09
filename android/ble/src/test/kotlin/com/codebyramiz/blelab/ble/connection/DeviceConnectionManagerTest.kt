@@ -230,6 +230,8 @@ class DeviceConnectionManagerTest {
 
         override suspend fun write(service: UUID, characteristic: UUID, value: ByteArray) = Unit
 
+        override suspend fun writeWithoutResponse(service: UUID, characteristic: UUID, value: ByteArray) = Unit
+
         override suspend fun enableNotifications(service: UUID, characteristic: UUID) = Unit
 
         override val isBonded: Boolean = true

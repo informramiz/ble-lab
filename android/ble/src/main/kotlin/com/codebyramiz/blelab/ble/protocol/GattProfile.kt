@@ -25,6 +25,18 @@ object GattProfile {
     /** Write with response, encrypted link (firmware 1.1.0+): UTF-8 text shown on the board's screen, see [MessageCodec]. */
     val MESSAGE: UUID = UUID.fromString("b1e1ab05-5a1e-4c3a-9f5e-c0de00b1e1ab")
 
+    /** OTA firmware update service (firmware 1.2.0+), see [OtaProtocol]. */
+    val OTA_SERVICE: UUID = UUID.fromString("b1e1ab10-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Write with response, encrypted link: START, ABORT and FINISH commands. */
+    val OTA_CONTROL: UUID = UUID.fromString("b1e1ab11-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Write without response, encrypted link: raw image bytes in order. */
+    val OTA_DATA: UUID = UUID.fromString("b1e1ab12-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Read + notify: 6-byte transfer status, see [OtaProtocol.decodeStatus]. */
+    val OTA_STATUS: UUID = UUID.fromString("b1e1ab13-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
     /** Bluetooth SIG Device Information service and the characteristics we read from it. */
     val DEVICE_INFO_SERVICE: UUID = sig(0x180A)
     val MANUFACTURER_NAME: UUID = sig(0x2A29)
