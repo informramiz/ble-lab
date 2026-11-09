@@ -60,7 +60,7 @@ struct SimulatedLink: GattLink {
     }
 
     func setNotify(_ enabled: Bool, for characteristic: AttributeID, in service: AttributeID) async throws(BLEError) {
-        try await op { p in await p.setNotify(enabled) }
+        try await op { p throws(BLEError) in try await p.setNotify(enabled, for: characteristic) }
     }
 
     func disconnect() async { await peripheral.centralDisconnected() }

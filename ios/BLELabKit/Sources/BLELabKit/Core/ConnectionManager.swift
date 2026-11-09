@@ -10,12 +10,18 @@ public final class ConnectionManager {
     public private(set) var state: ConnectionState = .idle
     /// Every decoded notification, for one consumer (the device screen's model).
     public let telemetry: AsyncStream<Telemetry>
+    /// IMU samples, flattened from the board's batches (firmware 1.1.0+).
+    public let motion: AsyncStream<MotionSample>
+    /// Touches on the board's screen (firmware 1.1.0+).
+    public let touches: AsyncStream<TouchEvent>
 
     private let central: any BLECentral
     private let backoff: BackoffPolicy
     private let sleeper: any Sleeper
     private let random: @Sendable () -> Double
     private let telemetryContinuation: AsyncStream<Telemetry>.Continuation
+    private let motionContinuation: AsyncStream<MotionSample>.Continuation
+    private let touchContinuation: AsyncStream<TouchEvent>.Continuation
     private var task: Task<Void, Never>?
     private var link: (any GattLink)?
 
@@ -30,6 +36,8 @@ public final class ConnectionManager {
         self.sleeper = sleeper
         self.random = random
         (telemetry, telemetryContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
+        (motion, motionContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(256))
+        (touches, touchContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(32))
     }
 
     /// Starts (or restarts) connecting. Retries transient failures; gives up after `maxAttempts`.
@@ -54,6 +62,18 @@ public final class ConnectionManager {
         guard let link, case .ready = state else { throw .notConnected }
         do throws(BLEError) {
             try await link.write(TelemetryCodec.encodeLed(on), to: .custom(GattProfile.led), in: .custom(GattProfile.labService))
+        } catch .insufficientEncryption {
+            throw .pairingFailed
+        }
+    }
+
+    /// Shows `text` on the board's screen (encrypted write, like the LED). Blank text fails without
+    /// touching the radio; text over 64 bytes is cut at a character boundary.
+    public func sendMessage(_ text: String) async throws(BLEError) {
+        guard let payload = MessageCodec.encode(text) else { throw .unexpected("Message is blank") }
+        guard let link, case .ready = state else { throw .notConnected }
+        do throws(BLEError) {
+            try await link.write(payload, to: .custom(GattProfile.message), in: .custom(GattProfile.labService))
         } catch .insufficientEncryption {
             throw .pairingFailed
         }
@@ -104,12 +124,26 @@ public final class ConnectionManager {
             }
             let events = link.events
             try await link.setNotify(true, for: .custom(GattProfile.telemetry), in: .custom(GattProfile.labService))
+            // Firmware 1.0.0 has neither characteristic; a refusal there must not fail the connection.
+            for optional in [GattProfile.motion, GattProfile.touch] {
+                do throws(BLEError) {
+                    try await link.setNotify(true, for: .custom(optional), in: .custom(GattProfile.labService))
+                } catch .serviceNotFound {
+                    continue
+                } catch .unexpected {
+                    continue
+                }
+            }
             state = .ready(info: info, maxWriteLength: await link.maximumWriteLength)
             onReady()
             for await event in events {
                 switch event {
                 case .notification(.custom(GattProfile.telemetry), let data):
                     if let reading = try? TelemetryCodec.decode(data) { telemetryContinuation.yield(reading) }
+                case .notification(.custom(GattProfile.motion), let data):
+                    if let batch = try? MotionCodec.decode(data) { batch.forEach { motionContinuation.yield($0) } }
+                case .notification(.custom(GattProfile.touch), let data):
+                    if let touch = try? TouchCodec.decode(data) { touchContinuation.yield(touch) }
                 case .notification:
                     continue
                 case .disconnected(let reason):
