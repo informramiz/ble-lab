@@ -1,0 +1,6 @@
+BLELabKit/.build/
+BLELabKit/.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.DS_Store

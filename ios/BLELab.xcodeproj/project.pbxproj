@@ -1,0 +1,370 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		27E970F574599FDBAF6D7B19 /* BLELabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A50E663D2F23B9841E474B /* BLELabApp.swift */; };
+		2A7CFE5F36406AE1F1B3763B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */; };
+		7308E9B40FC1AA2269A6D3D2 /* BLELabKit in Frameworks */ = {isa = PBXBuildFile; productRef = AF2AE5F417CCA1B285846D3F /* BLELabKit */; };
+		C540BB7DC30F81296A130780 /* DeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4A9A036460BFA981444782 /* DeviceView.swift */; };
+		F1073FC8C996462A7D33D0B6 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A35523AC29E0F919D28F9A5B /* ScanView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		18E3CCBF63E73B84FA9D25EB /* BLELab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BLELab.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		3449E5049A04464FEE0247EE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		45A50E663D2F23B9841E474B /* BLELabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLELabApp.swift; sourceTree = "<group>"; };
+		8FD63F2E2BC5C3CCED378B04 /* BLELabKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = BLELabKit; path = BLELabKit; sourceTree = SOURCE_ROOT; };
+		A35523AC29E0F919D28F9A5B /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		FE4A9A036460BFA981444782 /* DeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		22FBB5B617EDB004AA0900E8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7308E9B40FC1AA2269A6D3D2 /* BLELabKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		07E84817FCBAE4D831884722 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				18E3CCBF63E73B84FA9D25EB /* BLELab.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1B0088D8C00406BDA3F4F328 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				6DC20EE0608964D2CA58F1F3 /* BLELab */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		6DC20EE0608964D2CA58F1F3 /* BLELab */ = {
+			isa = PBXGroup;
+			children = (
+				28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */,
+				45A50E663D2F23B9841E474B /* BLELabApp.swift */,
+				FE4A9A036460BFA981444782 /* DeviceView.swift */,
+				3449E5049A04464FEE0247EE /* Info.plist */,
+				A35523AC29E0F919D28F9A5B /* ScanView.swift */,
+			);
+			path = BLELab;
+			sourceTree = "<group>";
+		};
+		81A40D7545C14F7B22F4FDB8 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				8FD63F2E2BC5C3CCED378B04 /* BLELabKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		A2AED0EF91EF2E709E1EE150 = {
+			isa = PBXGroup;
+			children = (
+				1B0088D8C00406BDA3F4F328 /* App */,
+				81A40D7545C14F7B22F4FDB8 /* Packages */,
+				07E84817FCBAE4D831884722 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CA70372311FDA3A3C62F8DAF /* BLELab */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7CF8D49AA6544E9D0D6E8181 /* Build configuration list for PBXNativeTarget "BLELab" */;
+			buildPhases = (
+				80EB92F2C74023A426CD016A /* Sources */,
+				2F50FE3B427E09E98DDBD96C /* Resources */,
+				22FBB5B617EDB004AA0900E8 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BLELab;
+			packageProductDependencies = (
+				AF2AE5F417CCA1B285846D3F /* BLELabKit */,
+			);
+			productName = BLELab;
+			productReference = 18E3CCBF63E73B84FA9D25EB /* BLELab.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F92CAD21529B9D9C1C32F88A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					CA70372311FDA3A3C62F8DAF = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 6367F6A861F6DFCC56F9D043 /* Build configuration list for PBXProject "BLELab" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A2AED0EF91EF2E709E1EE150;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				64492565A859AFD0370E0739 /* XCLocalSwiftPackageReference "BLELabKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 07E84817FCBAE4D831884722 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CA70372311FDA3A3C62F8DAF /* BLELab */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2F50FE3B427E09E98DDBD96C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2A7CFE5F36406AE1F1B3763B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		80EB92F2C74023A426CD016A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				27E970F574599FDBAF6D7B19 /* BLELabApp.swift in Sources */,
+				C540BB7DC30F81296A130780 /* DeviceView.swift in Sources */,
+				F1073FC8C996462A7D33D0B6 /* ScanView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2BC5819A0D9F7AF6F80A16B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/BLELab/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codebyramiz.blelab;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		572D0B467CF4A20AFF1DD178 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		7684E4DD4308D1723A7F752B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		FCF2180DB9AECE69710174AF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/BLELab/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codebyramiz.blelab;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6367F6A861F6DFCC56F9D043 /* Build configuration list for PBXProject "BLELab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7684E4DD4308D1723A7F752B /* Debug */,
+				572D0B467CF4A20AFF1DD178 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7CF8D49AA6544E9D0D6E8181 /* Build configuration list for PBXNativeTarget "BLELab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FCF2180DB9AECE69710174AF /* Debug */,
+				2BC5819A0D9F7AF6F80A16B2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		64492565A859AFD0370E0739 /* XCLocalSwiftPackageReference "BLELabKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = BLELabKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AF2AE5F417CCA1B285846D3F /* BLELabKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BLELabKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = F92CAD21529B9D9C1C32F88A /* Project object */;
+}
