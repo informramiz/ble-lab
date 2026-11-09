@@ -159,3 +159,55 @@ struct ForeverSleeper: Sleeper {
         #expect(try await iterator.next() == real)
     }
 }
+
+@MainActor
+@Suite struct DeviceModelBoardTests {
+    let peripheral = SimulatedPeripheral()
+    let repository = InMemoryRecordingRepository()
+
+    func makeModel() -> DeviceModel {
+        let manager = ConnectionManager(
+            central: SimulatedCentral(peripheral: peripheral, latency: .zero, sleeper: RecordingSleeper()),
+            sleeper: RecordingSleeper(),
+            random: { 0.5 }
+        )
+        let device = ScannedDevice(id: peripheral.id, name: peripheral.name, rssi: -50, isBleLab: true, isSimulated: true)
+        return DeviceModel(device: device, manager: manager, recorder: SessionRecorder(repository: repository, batchSize: 2))
+    }
+
+    @Test func exposesMotionTiltTouchAndFlags() async {
+        let model = makeModel()
+        model.start()
+        #expect(await waitUntil { model.state.isReady })
+        await peripheral.pushTelemetry()
+        await peripheral.pushMotion()
+        await peripheral.touch(x: 10, y: 20, kind: .tap)
+        #expect(await waitUntil { !model.motion.isEmpty && !model.touches.isEmpty && model.latest != nil })
+        #expect(model.hasMotionSensor && model.hasTouchScreen)
+        #expect(model.tilt != nil)
+        #expect(model.touches.last?.x == 10)
+    }
+
+    @Test func messageIsSentAndReported() async {
+        let model = makeModel()
+        model.start()
+        #expect(await waitUntil { model.state.isReady })
+        await model.sendMessage("  hello  ")
+        #expect(model.messageStatus == .shown("hello"))
+        #expect(await peripheral.messages == ["hello"])
+    }
+
+    @Test func recordingSavesSessionWithSamples() async {
+        let model = makeModel()
+        model.start()
+        #expect(await waitUntil { model.state.isReady })
+        await model.toggleRecording()
+        #expect(model.isRecording)
+        await peripheral.pushTelemetry()
+        #expect(await waitUntil { model.recorder?.state != .recording(sessionId: 1, startedAtMillis: 0, telemetryCount: 0, motionCount: 0) && (model.samples.count > 0) })
+        await model.toggleRecording()
+        #expect(!model.isRecording)
+        let sessions = await repository.sessions()
+        #expect(sessions.count == 1 && sessions[0].telemetryCount >= 1 && sessions[0].endedAtMillis != nil)
+    }
+}

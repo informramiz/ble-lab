@@ -7,6 +7,8 @@ import Observation
 @Observable
 public final class DeviceModel {
     public static let window = 90
+    public static let motionWindow = 150
+    public static let touchHistory = 20
 
     public let device: ScannedDevice
     public let manager: ConnectionManager
@@ -15,13 +17,39 @@ public final class DeviceModel {
     public private(set) var ledPending = false
     public private(set) var writeError: BLEError?
     public private(set) var log: [String] = []
+    public private(set) var motion: [MotionSample] = []
+    public private(set) var touches: [TouchEvent] = []
+    public private(set) var messageStatus: MessageStatus = .idle
+    public private(set) var messageSending = false
+    public let recorder: SessionRecorder?
+
+    public enum MessageStatus: Equatable, Sendable {
+        case idle
+        case shown(String)
+        case failed(String)
+    }
 
     private var telemetryTask: Task<Void, Never>?
+    private var motionTask: Task<Void, Never>?
+    private var touchTask: Task<Void, Never>?
     private var lastLoggedState: ConnectionState?
 
-    public init(device: ScannedDevice, manager: ConnectionManager) {
+    public init(device: ScannedDevice, manager: ConnectionManager, recorder: SessionRecorder? = nil) {
         self.device = device
         self.manager = manager
+        self.recorder = recorder
+    }
+
+    /// Flags from the newest telemetry; false until the first reading (firmware before 1.1.0 never sets them).
+    public var hasMotionSensor: Bool { latest?.hasMotionSensor ?? false }
+    public var hasTouchScreen: Bool { latest?.hasTouchScreen ?? false }
+
+    public var tilt: Tilt? { motion.last.map(Tilt.init(from:)) }
+
+    public var isRecording: Bool { recorder?.isRecording ?? false }
+
+    public var canSendMessage: Bool {
+        if case .ready = manager.state { !messageSending } else { false }
     }
 
     public var state: ConnectionState { manager.state }
@@ -44,7 +72,15 @@ public final class DeviceModel {
         guard telemetryTask == nil else { return }
         let stream = manager.telemetry
         telemetryTask = Task { [weak self] in
-            for await reading in stream { self?.receive(reading) }
+            for await reading in stream { await self?.receive(reading) }
+        }
+        let motionStream = manager.motion
+        motionTask = Task { [weak self] in
+            for await sample in motionStream { await self?.receive(sample) }
+        }
+        let touchStream = manager.touches
+        touchTask = Task { [weak self] in
+            for await event in touchStream { self?.receive(event) }
         }
     }
 
@@ -52,7 +88,12 @@ public final class DeviceModel {
 
     public func stop() async {
         telemetryTask?.cancel()
+        motionTask?.cancel()
+        touchTask?.cancel()
         telemetryTask = nil
+        motionTask = nil
+        touchTask = nil
+        await recorder?.stop()  // Leaving the screen saves the session instead of leaving an orphan.
         await manager.disconnect()
     }
 
@@ -87,7 +128,43 @@ public final class DeviceModel {
         }
     }
 
-    private func receive(_ reading: Telemetry) {
+    public func toggleRecording() async {
+        guard let recorder else { return }
+        if recorder.isRecording {
+            if let id = await recorder.stop() { append("Saved recording #\(id)") }
+        } else {
+            await recorder.start(deviceAddress: device.id.uuidString, deviceName: device.name)
+            append("Recording started")
+        }
+    }
+
+    public func sendMessage(_ text: String) async {
+        guard canSendMessage else { return }
+        messageSending = true
+        defer { messageSending = false }
+        do throws(BLEError) {
+            try await manager.sendMessage(text)
+            messageStatus = .shown(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            append("Message sent")
+        } catch {
+            messageStatus = .failed(error.message)
+            append("Message failed: \(error.message)")
+        }
+    }
+
+    private func receive(_ sample: MotionSample) async {
+        motion.append(sample)
+        if motion.count > Self.motionWindow { motion.removeFirst(motion.count - Self.motionWindow) }
+        await recorder?.onMotion(sample)
+    }
+
+    private func receive(_ event: TouchEvent) {
+        touches.append(event)
+        if touches.count > Self.touchHistory { touches.removeFirst(touches.count - Self.touchHistory) }
+    }
+
+    private func receive(_ reading: Telemetry) async {
+        await recorder?.onTelemetry(reading)
         samples.append(reading)
         if samples.count > Self.window { samples.removeFirst(samples.count - Self.window) }
         if !ledPending { ledOn = reading.ledOn }  // The board is the source of truth once a write settles.
