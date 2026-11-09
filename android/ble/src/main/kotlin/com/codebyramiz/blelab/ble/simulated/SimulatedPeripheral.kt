@@ -11,6 +11,9 @@ import com.codebyramiz.blelab.ble.model.ScannedDevice
 import com.codebyramiz.blelab.ble.model.Telemetry
 import com.codebyramiz.blelab.ble.model.TouchEvent
 import com.codebyramiz.blelab.ble.model.TouchKind
+import com.codebyramiz.blelab.ble.ota.EcdsaOtaVerifier
+import com.codebyramiz.blelab.ble.ota.OtaSignature
+import com.codebyramiz.blelab.ble.ota.OtaSignatureVerifier
 import com.codebyramiz.blelab.ble.protocol.GattProfile
 import com.codebyramiz.blelab.ble.protocol.GattStatus
 import com.codebyramiz.blelab.ble.protocol.MessageCodec
@@ -57,6 +60,8 @@ class SimulatedPeripheral(
     private val otaSlotBytes: Long = 3L * 1024 * 1024,
     /** Pause before each simulated data write; keeps a demo transfer to a few seconds. */
     private val otaWriteDelayMillis: Long = 2,
+    /** Plays the board's compiled-in public key; the default trusts the firmware's development key. */
+    private val otaVerifier: OtaSignatureVerifier = EcdsaOtaVerifier(OtaSignature.FIRMWARE_DEV_KEY),
 ) {
     /** Fail the next N connection attempts with GATT 133. */
     @Volatile var connectFailuresRemaining: Int = 0
@@ -86,10 +91,9 @@ class SimulatedPeripheral(
 
     /** Device Information firmware revision; becomes [otaResultRevision] after an accepted OTA and reboot. */
     @Volatile var firmwareRevision: String = "ble-lab 1.1.0"
-        private set
 
     /** What the board reports after it has restarted into an accepted image. */
-    @Volatile var otaResultRevision: String = "ble-lab 1.2.0"
+    @Volatile var otaResultRevision: String = "ble-lab 1.3.0"
 
     /** Largest number of bytes the central ever had in flight beyond the last acknowledged offset. */
     @Volatile var otaMaxBytesAhead: Long = 0
@@ -138,12 +142,17 @@ class SimulatedPeripheral(
     private fun otaControl(value: ByteArray) {
         when (value.firstOrNull()) {
             OtaProtocol.CMD_START -> {
-                if (value.size != 1 + 4 + OtaProtocol.SHA256_LENGTH) return otaFail(OtaError.BadCommand)
+                if (value.size != OtaProtocol.START_LENGTH) return otaFail(OtaError.BadCommand)
                 if (otaState == OtaState.Receiving) return otaFail(OtaError.BadState)
                 otaReset()
                 otaSize = (0 until 4).sumOf { (value[1 + it].toLong() and 0xFF) shl (8 * it) }
-                otaHash = value.copyOfRange(5, value.size)
+                otaHash = value.copyOfRange(5, 5 + OtaProtocol.SHA256_LENGTH)
                 if (otaSize == 0L || otaSize > otaSlotBytes) return otaFail(OtaError.TooLarge)
+                val versionAt = 5 + OtaProtocol.SHA256_LENGTH
+                val versionCode = (0 until 4).sumOf { (value[versionAt + it].toLong() and 0xFF) shl (8 * it) }
+                // Same order as the firmware: authenticity first, then anti-rollback, all before any flash write.
+                if (!otaVerifier.verify(otaSize, versionCode, otaHash, value.copyOfRange(versionAt + 4, value.size))) return otaFail(OtaError.BadSignature)
+                if (versionCode < (OtaSignature.versionCode(firmwareRevision) ?: 0)) return otaFail(OtaError.Downgrade)
                 otaDigest = MessageDigest.getInstance("SHA-256")
                 otaState = OtaState.Receiving
                 otaNotify()

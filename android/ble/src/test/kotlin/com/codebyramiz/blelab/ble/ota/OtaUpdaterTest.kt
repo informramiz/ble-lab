@@ -68,7 +68,7 @@ class OtaUpdaterTest {
         assertThat(link.received).isEqualTo(20_000)
         assertThat(link.maxAhead).isAtMost(OtaProtocol.WINDOW_BYTES)
         assertThat(link.controls.map { it[0] }).containsExactly(OtaProtocol.CMD_START, OtaProtocol.CMD_FINISH).inOrder()
-        assertThat(link.controls.first()).isEqualTo(OtaProtocol.encodeStart(20_000, img.sha256))
+        assertThat(link.controls.first()).isEqualTo(OtaProtocol.encodeStart(20_000, img.sha256, img.versionCode, img.signatureOrBlank))
     }
 
     @Test

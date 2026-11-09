@@ -111,7 +111,7 @@ class DeviceConnectionManager(
         val client = activeClient
         val ready = _state.value as? ConnectionState.Ready
         if (client == null || ready == null) return flowOf(OtaProgress.Failed(BleError.NotConnected.message))
-        if (!ready.otaSupported) return flowOf(OtaProgress.Failed("This firmware has no update service; flash 1.2.0 over USB once"))
+        if (!ready.otaSupported) return flowOf(OtaProgress.Failed("This firmware has no update service; flash 1.3.0 over USB once"))
         val link = object : OtaLink {
             override val status: Flow<OtaStatus> = otaStatusEvents
             override suspend fun writeControl(value: ByteArray) = withBonding(client, ready.address) {

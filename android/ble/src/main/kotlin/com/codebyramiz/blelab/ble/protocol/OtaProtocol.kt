@@ -28,6 +28,8 @@ enum class OtaError(val code: Int, val message: String) {
     Hash(8, "The image failed the board's SHA-256 check"),
     Image(9, "The board rejected the image as not valid firmware"),
     Aborted(10, "The update was aborted"),
+    BadSignature(11, "The board refused the image: it is unsigned, or signed with a key the board does not trust"),
+    Downgrade(12, "The board refused the image: it is older than the firmware already running"),
     Unknown(-1, "The board reported an unknown error"),
     ;
 
@@ -40,9 +42,9 @@ enum class OtaError(val code: Int, val message: String) {
 data class OtaStatus(val state: OtaState, val error: OtaError, val offset: Long)
 
 /**
- * OTA protocol v1, mirrored from `firmware/ble_lab/gatt_profile.h`.
+ * OTA protocol v2, mirrored from `firmware/ble_lab/gatt_profile.h`.
  *
- * Control (write with response): START = `01` + u32 size LE + 32-byte SHA-256, ABORT = `02`,
+ * Control (write with response): START = `01` + u32 size LE + 32-byte SHA-256 + u32 version code LE + 64-byte signature, ABORT = `02`,
  * FINISH = `03`. Data (write without response): raw image bytes, in order. Status: u8 state,
  * u8 error, u32 offset LE. The board notifies status on START (offset 0, "ready"), every
  * [ACK_INTERVAL] bytes, and when the last byte is in; the central stays within [WINDOW_BYTES]
@@ -56,6 +58,8 @@ object OtaProtocol {
     const val ACK_INTERVAL = 1024
     const val WINDOW_BYTES = 4096
     const val SHA256_LENGTH = 32
+    const val SIGNATURE_LENGTH = 64
+    const val START_LENGTH = 1 + 4 + SHA256_LENGTH + 4 + SIGNATURE_LENGTH
     const val STATUS_LENGTH = 6
 
     /** ATT header (opcode + handle) that comes out of the MTU for each write. */
@@ -64,13 +68,19 @@ object OtaProtocol {
     val ABORT = byteArrayOf(CMD_ABORT)
     val FINISH = byteArrayOf(CMD_FINISH)
 
-    fun encodeStart(size: Long, sha256: ByteArray): ByteArray {
+    fun encodeStart(size: Long, sha256: ByteArray, versionCode: Long, signature: ByteArray): ByteArray {
         require(size in 1..UInt.MAX_VALUE.toLong()) { "Image size out of range: $size" }
         require(sha256.size == SHA256_LENGTH) { "SHA-256 must be $SHA256_LENGTH bytes" }
-        val out = ByteArray(1 + 4 + SHA256_LENGTH)
+        require(versionCode in 0..UInt.MAX_VALUE.toLong()) { "Version code out of range: $versionCode" }
+        require(signature.size == SIGNATURE_LENGTH) { "Signature must be $SIGNATURE_LENGTH bytes" }
+        val out = ByteArray(START_LENGTH)
         out[0] = CMD_START
-        for (i in 0 until 4) out[1 + i] = (size shr (8 * i)).toByte()
+        for (i in 0 until 4) {
+            out[1 + i] = (size shr (8 * i)).toByte()
+            out[5 + SHA256_LENGTH + i] = (versionCode shr (8 * i)).toByte()
+        }
         sha256.copyInto(out, destinationOffset = 5)
+        signature.copyInto(out, destinationOffset = 5 + SHA256_LENGTH + 4)
         return out
     }
 

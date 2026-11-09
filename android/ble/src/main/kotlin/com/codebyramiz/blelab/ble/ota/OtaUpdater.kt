@@ -82,7 +82,7 @@ class OtaUpdater(
 
     private suspend fun transfer(image: FirmwareImage, latest: MutableStateFlow<OtaStatus?>, emit: suspend (OtaProgress) -> Unit) {
         val total = image.size.toLong()
-        link.writeControl(OtaProtocol.encodeStart(total, image.sha256))
+        link.writeControl(OtaProtocol.encodeStart(total, image.sha256, image.versionCode, image.signatureOrBlank))
         await(latest, START_TIMEOUT_FACTOR * stallTimeoutMillis) { it.state == OtaState.Receiving }
 
         var sent = 0L
