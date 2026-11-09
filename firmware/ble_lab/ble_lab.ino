@@ -423,6 +423,9 @@ void setup() {
   BLESecurity *security = new BLESecurity();
   security->setAuthenticationMode(true, true, true);
   security->setCapability(ESP_IO_CAP_OUT);
+  // Random key, new on every connection. Without setPassKey() the core keeps its default 123456
+  // and regenPassKeyOnConnect() has no effect (BLESecurity only regenerates once a key is set).
+  security->setPassKey(false);
   security->regenPassKeyOnConnect(true);
   BLEDevice::setSecurityCallbacks(new PairingCallbacks());
 
