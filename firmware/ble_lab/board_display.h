@@ -189,6 +189,29 @@ static void drawTilt(bool hasImu, float ax, float ay) {
   t.pushSprite(TILT_X, TILT_Y);
 }
 
+// Firmware update screen: percent 0..100, or -1 for "verifying and restarting".
+static void drawUpdate(int percent, bool failed) {
+  auto &d = canvas;
+  d.fillScreen(BG);
+  d.setTextDatum(top_left);
+  d.setTextColor(TFT_WHITE);
+  d.setFont(&fonts::FreeSansBold12pt7b);
+  d.drawString(failed ? "Update failed" : "Updating firmware", 12, 12);
+  d.setFont(&fonts::FreeSans9pt7b);
+  d.setTextColor(MUTED);
+  d.drawString(percent < 0 ? "Verifying, restarting..." : "Keep the phone close", 12, 50);
+  d.fillRoundRect(20, 110, 280, 22, 11, CARD);
+  const int fill = percent < 0 ? 280 : (280 * percent) / 100;
+  if (fill > 0) d.fillRoundRect(20, 110, fill < 22 ? 22 : fill, 22, 11, failed ? WARN : ACCENT);
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d%%", percent < 0 ? 100 : percent);
+  d.setFont(&fonts::FreeSansBold24pt7b);
+  d.setTextColor(TFT_WHITE);
+  d.setTextDatum(top_center);
+  d.drawString(buf, 160, 150);
+  d.pushSprite(0, 0);
+}
+
 }  // namespace board_display
 
 #else
@@ -197,5 +220,6 @@ namespace board_display {
 static void begin() {}
 static void draw(const Frame &) {}
 static void drawTilt(bool, float, float) {}
+static void drawUpdate(int, bool) {}
 }  // namespace board_display
 #endif

@@ -4,6 +4,8 @@
 // Services:
 //   BLE Lab (custom)   telemetry notify every 200 ms, LED write (encrypted, Just Works bonding),
 //                      motion notify (IMU batches, 50 Hz), touch notify, message write (encrypted)
+//   OTA update         firmware image over BLE (control, data, status), encrypted writes,
+//                      SHA-256 checked, rollback to the previous image if the new one never confirms
 //   Device Information 0x180A: manufacturer, model, firmware revision
 //
 // Serial test console (115200 baud), for checking the touch path without a finger:
@@ -20,6 +22,7 @@
 #include "gatt_profile.h"
 #include "board_display.h"
 #include "board_sensors.h"
+#include "ota_update.h"
 
 #if !BOARD_HAS_DISPLAY && !defined(LED_BUILTIN)
 #define LED_BUILTIN 2  // Most ESP32 DevKit v1 boards wire the blue LED to GPIO2.
@@ -31,6 +34,7 @@ static BLECharacteristic *ledChar = nullptr;
 static BLECharacteristic *motionChar = nullptr;
 static BLECharacteristic *touchChar = nullptr;
 static BLECharacteristic *messageChar = nullptr;
+static BLECharacteristic *otaStatusChar = nullptr;
 static volatile bool connected = false;
 static bool ledOn = false;
 static uint32_t sequence = 0;
@@ -60,6 +64,13 @@ static portMUX_TYPE messageMux = portMUX_INITIALIZER_UNLOCKED;
 static char pendingMessage[MESSAGE_MAX_BYTES + 1];
 static volatile bool messagePending = false;
 static char message[MESSAGE_MAX_BYTES + 1] = "";
+
+static OtaReceiver ota;
+static volatile uint32_t rebootAtMs = 0;  // 0 = none scheduled.
+static bool imageConfirmed = false;
+
+// See ota_rollback.cpp: a freshly flashed image is confirmed here, once BLE is up and the loop has
+// run for a few seconds.
 
 static void setLed(bool on) {
   ledOn = on;
@@ -204,6 +215,19 @@ static void pollConsole() {
   }
 }
 
+static void notifyOtaStatus() {
+  uint8_t out[OTA_STATUS_LENGTH];
+  uint32_t offset = ota.offset();
+  out[0] = ota.state();
+  out[1] = ota.error();
+  out[2] = offset & 0xFF;
+  out[3] = (offset >> 8) & 0xFF;
+  out[4] = (offset >> 16) & 0xFF;
+  out[5] = (offset >> 24) & 0xFF;
+  otaStatusChar->setValue(out, OTA_STATUS_LENGTH);
+  if (connected) otaStatusChar->notify();
+}
+
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *s) override {
     connected = true;
@@ -213,6 +237,10 @@ class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *s) override {
     connected = false;
     screenDirty = true;
+    if (ota.active()) {
+      ota.abort();
+      Serial.println("update aborted: central disconnected");
+    }
     Serial.println("central disconnected; advertising again");
     // advertiseOnDisconnect(true) restarts advertising, so the phone's backoff loop can reconnect.
   }
@@ -227,6 +255,46 @@ class MessageCallbacks : public BLECharacteristicCallbacks {
     pendingMessage[v.length()] = 0;
     messagePending = true;
     portEXIT_CRITICAL(&messageMux);
+  }
+};
+
+class OtaControlCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    const uint8_t *v = c->getData();
+    size_t len = c->getLength();
+    if (len == 0) return;
+    switch (v[0]) {
+      case OTA_CMD_START:
+        if (ota.start(v + 1, len - 1)) Serial.printf("update: start, %u bytes\n", (unsigned)ota.size());
+        break;
+      case OTA_CMD_ABORT:
+        ota.abort();
+        Serial.println("update: aborted by central");
+        break;
+      case OTA_CMD_FINISH:
+        if (ota.finish()) {
+          Serial.println("update: verified, restarting");
+          rebootAtMs = millis() + OTA_REBOOT_DELAY_MS;
+          if (rebootAtMs == 0) rebootAtMs = 1;
+        } else {
+          Serial.printf("update: finish failed, error %u\n", ota.error());
+        }
+        break;
+      default:
+        return;  // Unknown command: ignored, nothing changes.
+    }
+    notifyOtaStatus();
+  }
+};
+
+class OtaDataCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    bool ok = ota.data(c->getData(), c->getLength());
+    if (!ok && ota.state() != OTA_STATE_ERROR) return;  // Chunk in the wrong state: dropped.
+    if (ota.takeAckDue()) {
+      if (!ok) Serial.printf("update: write failed, error %u\n", ota.error());
+      notifyOtaStatus();
+    }
   }
 };
 
@@ -245,6 +313,35 @@ static void addDeviceInformationService() {
   dis->createCharacteristic(BLEUUID((uint16_t)0x2A24), BLECharacteristic::PROPERTY_READ)->setValue(MODEL_NUMBER);
   dis->createCharacteristic(BLEUUID((uint16_t)0x2A26), BLECharacteristic::PROPERTY_READ)->setValue(FIRMWARE_REVISION);
   dis->start();
+}
+
+static void addOtaService() {
+  BLEService *svc = server->createService(OTA_SERVICE_UUID);
+
+  BLECharacteristic *control = svc->createCharacteristic(OTA_CONTROL_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+  control->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  control->setCallbacks(new OtaControlCallbacks());
+  BLE2901 *controlName = new BLE2901();
+  controlName->setDescription("OTA control: 01 size32 sha256 | 02 | 03");
+  control->addDescriptor(controlName);
+
+  BLECharacteristic *data = svc->createCharacteristic(OTA_DATA_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE_NR);
+  data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  data->setCallbacks(new OtaDataCallbacks());
+  BLE2901 *dataName = new BLE2901();
+  dataName->setDescription("OTA data: image bytes in order");
+  data->addDescriptor(dataName);
+
+  otaStatusChar = svc->createCharacteristic(
+      OTA_STATUS_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  otaStatusChar->addDescriptor(new BLE2902());
+  BLE2901 *statusName = new BLE2901();
+  statusName->setDescription("OTA status: u8 state, u8 error, u32 offset");
+  otaStatusChar->addDescriptor(statusName);
+  uint8_t idle[OTA_STATUS_LENGTH] = {0};
+  otaStatusChar->setValue(idle, OTA_STATUS_LENGTH);
+
+  svc->start();
 }
 
 static void addLabService() {
@@ -312,6 +409,7 @@ void setup() {
 
   addDeviceInformationService();
   addLabService();
+  addOtaService();
   setLed(false);
 
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
@@ -325,6 +423,24 @@ void setup() {
 
 void loop() {
   uint32_t now = millis();
+  if (!imageConfirmed && now >= OTA_VALIDATE_AFTER_MS) {
+    imageConfirmed = true;
+    esp_ota_mark_app_valid_cancel_rollback();  // No-op unless this boot is a pending-verify image.
+  }
+  if (rebootAtMs != 0 && (int32_t)(now - rebootAtMs) >= 0) ESP.restart();
+
+  if (ota.state() == OTA_STATE_RECEIVING || ota.state() == OTA_STATE_DONE) {
+    // Update in progress: keep the radio for the image, show progress, skip sensor streams.
+    if (BOARD_HAS_DISPLAY && now - lastDrawMs >= 250) {
+      lastDrawMs = now;
+      int pct = ota.state() == OTA_STATE_DONE ? -1 : (int)(((uint64_t)ota.offset() * 100) / ota.size());
+      board_display::drawUpdate(pct, false);
+    }
+    motionCount = 0;
+    pollConsole();
+    delay(5);
+    return;
+  }
   sampleMotion(now);
   if (connected && now - lastNotifyMs >= TELEMETRY_PERIOD_MS) {
     lastNotifyMs = now;

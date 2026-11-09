@@ -94,7 +94,23 @@ arduino-cli lib install M5Unified@0.3.0
 arduino-cli compile --fqbn esp32:esp32:m5stack_cores3 firmware/ble_lab
 arduino-cli upload  --fqbn esp32:esp32:m5stack_cores3 -p /dev/cu.usbmodem<N> firmware/ble_lab
 ```
-CoreS3 build: 826,911 bytes of flash (26%), 32,296 bytes of RAM (9%).
+CoreS3 build (1.2.0): 1,333,323 bytes of flash (42% of a 3 MB slot), 33,456 bytes of RAM (10%).
+
+**Over-the-air update (1.2.0).** The CoreS3 partition scheme that arduino-cli picks by default,
+`PartitionScheme=app3M_fat9M_16MB` ("16M Flash (3MB APP/9.9MB FATFS)", `app3M_fat9M_16MB.csv` in the core), has two
+3 MB app slots, `ota_0` at 0x10000 and `ota_1` at 0x310000, plus `otadata`. The firmware receives an image over BLE with
+the Arduino-ESP32 `Update` library, checks its SHA-256, reboots into the other slot and confirms the new image about 5 s
+after boot; a crash before that makes the bootloader roll back (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` in the
+core's CoreS3 build). Build the `.bin` the apps flash, naming the scheme so it cannot drift:
+
+```sh
+arduino-cli compile --fqbn esp32:esp32:m5stack_cores3:PartitionScheme=app3M_fat9M_16MB \
+  --output-dir firmware/ble_lab/build firmware/ble_lab
+# update file: firmware/ble_lab/build/ble_lab.ino.bin   (not ...merged.bin, which includes the bootloader)
+```
+
+The first OTA-capable build has to go over USB. The generic ESP32 build (`esp32:esp32:esp32`, 1,111,987 bytes) also
+fits the default two 1.25 MB slots, but the OTA path has only been designed against the CoreS3 scheme.
 
 Tested on hardware (CoreS3, firmware 1.0.0): a Pixel 4a (5G) on Android finds the board, connects (MTU 247),
 streams telemetry at 5 Hz, pairs on the first LED write, and switches the lamp on and off; the state is read back from

@@ -22,6 +22,51 @@
 // Write with response (1.1.0), encrypted link required. UTF-8 text, 1..64 bytes, shown on screen.
 #define MESSAGE_CHAR_UUID    "b1e1ab05-5a1e-4c3a-9f5e-c0de00b1e1ab"
 
+// Over-the-air update service (1.2.0). Every write needs an encrypted link. One image per session:
+//   1. central writes START to control, waits for a status notify with state RECEIVING, offset 0
+//   2. central streams the .bin as consecutive write-without-response chunks on data, never more
+//      than OTA_WINDOW_BYTES ahead of the last offset the board reported
+//   3. board notifies status (state RECEIVING, offset = bytes flashed so far) every
+//      OTA_ACK_INTERVAL bytes and once when the last byte is in
+//   4. central writes FINISH; board checks size, SHA-256 and the image header, then notifies
+//      state DONE and reboots about a second later. ABORT (or a disconnect) discards the transfer.
+#define OTA_SERVICE_UUID     "b1e1ab10-5a1e-4c3a-9f5e-c0de00b1e1ab"
+// Write with response. Commands: 0x01 START + uint32 size (LE) + 32-byte SHA-256 of the whole image
+// (37 bytes), 0x02 ABORT (1 byte), 0x03 FINISH (1 byte).
+#define OTA_CONTROL_CHAR_UUID "b1e1ab11-5a1e-4c3a-9f5e-c0de00b1e1ab"
+// Write without response. Raw image bytes in order, 1..(MTU - 3) bytes per write.
+#define OTA_DATA_CHAR_UUID   "b1e1ab12-5a1e-4c3a-9f5e-c0de00b1e1ab"
+// Read + notify, 6 bytes, little-endian: uint8 state, uint8 error, uint32 offset.
+// Reading it returns the current state (IDLE after boot, so a phone can tell the board restarted).
+#define OTA_STATUS_CHAR_UUID "b1e1ab13-5a1e-4c3a-9f5e-c0de00b1e1ab"
+
+#define OTA_STATE_IDLE       0
+#define OTA_STATE_RECEIVING  1
+#define OTA_STATE_DONE       2   // image verified, rebooting
+#define OTA_STATE_ERROR      3   // transfer discarded; "error" says why
+
+#define OTA_ERR_NONE         0
+#define OTA_ERR_BAD_COMMAND  1   // unknown or malformed command
+#define OTA_ERR_BAD_STATE    2   // command or data in the wrong state
+#define OTA_ERR_TOO_LARGE    3   // image does not fit the OTA slot
+#define OTA_ERR_BEGIN        4   // Update.begin failed (no OTA partition)
+#define OTA_ERR_WRITE        5   // flash write failed
+#define OTA_ERR_OVERFLOW     6   // more bytes than START announced
+#define OTA_ERR_INCOMPLETE   7   // FINISH before every byte arrived
+#define OTA_ERR_HASH         8   // SHA-256 mismatch
+#define OTA_ERR_IMAGE        9   // not a valid ESP32 app image, or activation failed
+#define OTA_ERR_ABORTED      10  // ABORT command or disconnect
+
+#define OTA_CMD_START        0x01
+#define OTA_CMD_ABORT        0x02
+#define OTA_CMD_FINISH       0x03
+#define OTA_START_LENGTH     37
+#define OTA_STATUS_LENGTH    6
+#define OTA_ACK_INTERVAL     1024
+#define OTA_WINDOW_BYTES     4096
+#define OTA_REBOOT_DELAY_MS  1000
+#define OTA_VALIDATE_AFTER_MS 5000
+
 #define DEVICE_NAME          "ble-lab-esp32"
 #define MANUFACTURER_NAME    "Espressif"
 #if defined(ARDUINO_M5STACK_CORES3)
@@ -29,7 +74,7 @@
 #else
 #define MODEL_NUMBER         "ESP32-WROOM-32"
 #endif
-#define FIRMWARE_REVISION    "ble-lab 1.1.0"
+#define FIRMWARE_REVISION    "ble-lab 1.2.0"
 
 #define PREFERRED_MTU        247
 #define TELEMETRY_PERIOD_MS  200
