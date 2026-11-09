@@ -10,17 +10,26 @@
 
 namespace board_display {
 
+// Off-screen frame buffer: draw the whole frame here, then push it in one go, so the
+// twice-a-second redraw doesn't flash black. 320x240x16 bit = 150 KB, kept in PSRAM.
+static M5Canvas canvas(&M5.Display);
+
 static void begin() {
   auto cfg = M5.config();
   cfg.serial_baudrate = 0;  // Serial is opened by the sketch.
   M5.begin(cfg);
   M5.Display.setRotation(1);
   M5.Display.fillScreen(TFT_BLACK);
+  canvas.setPsram(true);
+  canvas.setColorDepth(16);
+  if (!canvas.createSprite(M5.Display.width(), M5.Display.height())) {
+    canvas.setPsram(false);  // PSRAM off in the board options: fall back to internal RAM.
+    canvas.createSprite(M5.Display.width(), M5.Display.height());
+  }
 }
 
 static void draw(bool connected, bool ledOn, int16_t valueX100, uint32_t sequence) {
-  auto &d = M5.Display;
-  d.startWrite();
+  auto &d = canvas;
   d.fillScreen(TFT_BLACK);
 
   d.setTextDatum(top_left);
@@ -56,7 +65,7 @@ static void draw(bool connected, bool ledOn, int16_t valueX100, uint32_t sequenc
   d.setTextDatum(top_center);
   d.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   d.drawString(ledOn ? "LED on" : "LED off", cx, cy + r + 10);
-  d.endWrite();
+  d.pushSprite(0, 0);
 }
 
 }  // namespace board_display
