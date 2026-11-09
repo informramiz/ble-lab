@@ -108,6 +108,7 @@ fun DeviceRoute(onBack: () -> Unit, viewModel: DeviceViewModel = hiltViewModel()
         onLedChange = viewModel::setLed,
         onToggleRecording = viewModel::toggleRecording,
         onSendMessage = viewModel::sendMessage,
+        firmware = FirmwareActions(viewModel::pickFirmware, viewModel::startFirmwareUpdate, viewModel::cancelFirmwareUpdate, viewModel::dismissFirmware),
     )
 }
 
@@ -121,6 +122,7 @@ fun DeviceScreen(
     onToggleRecording: () -> Unit,
     onSendMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
+    firmware: FirmwareActions = FirmwareActions(),
     initialTab: DeviceTab = DeviceTab.Live,
 ) {
     val connection = state.connection
@@ -173,7 +175,7 @@ fun DeviceScreen(
                 when (tab) {
                     DeviceTab.Live -> LiveTab(state, onToggleRecording)
                     DeviceTab.Motion -> MotionTab(state)
-                    DeviceTab.Board -> BoardTab(state, onLedChange, onSendMessage)
+                    DeviceTab.Board -> BoardTab(state, onLedChange, onSendMessage, firmware)
                 }
             }
         }
@@ -266,10 +268,11 @@ private const val ACCEL_MIN_EXTENT = 1f
 private const val GYRO_MIN_EXTENT = 50f
 
 @Composable
-private fun BoardTab(state: DeviceUiState, onLedChange: (Boolean) -> Unit, onSendMessage: (String) -> Unit) {
+private fun BoardTab(state: DeviceUiState, onLedChange: (Boolean) -> Unit, onSendMessage: (String) -> Unit, firmware: FirmwareActions) {
     val ready = state.connection is ConnectionState.Ready
     LedCard(state, enabled = ready, onLedChange)
     TouchCard(state)
+    FirmwareCard(state, firmware)
     MessageCard(state.message, enabled = ready, onSend = onSendMessage)
 }
 

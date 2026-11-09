@@ -10,16 +10,22 @@ import com.codebyramiz.blelab.ble.model.ConnectionState
 import com.codebyramiz.blelab.ble.model.MotionSample
 import com.codebyramiz.blelab.ble.model.Telemetry
 import com.codebyramiz.blelab.ble.model.TouchEvent
+import com.codebyramiz.blelab.ble.ota.FirmwareImage
+import com.codebyramiz.blelab.ble.ota.OtaProgress
 import com.codebyramiz.blelab.recording.Clock
 import com.codebyramiz.blelab.recording.RecordingRepository
 import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.recording.SessionRecorder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 data class DeviceUiState(
@@ -39,10 +45,29 @@ data class DeviceUiState(
     val touches: List<TouchEvent> = emptyList(),
     val message: MessageStatus = MessageStatus.None,
     val recording: RecordingState = RecordingState.Idle,
+    val firmware: FirmwareUpdate = FirmwareUpdate.None,
 ) {
     /** The firmware flags which sensors it has in every telemetry packet; false until the first one arrives. */
     val hasImu: Boolean get() = latest?.hasImu == true
     val hasTouch: Boolean get() = latest?.hasTouch == true
+
+    /** Only boards running firmware 1.2.0 or later expose the update service. */
+    val canUpdateFirmware: Boolean get() = (connection as? ConnectionState.Ready)?.otaSupported == true
+}
+
+/** Where the over-the-air firmware update is, from picking a file to the board coming back. */
+sealed interface FirmwareUpdate {
+    data object None : FirmwareUpdate
+
+    /** A valid image is chosen and waits for the user to start. [version] is null when the file does not name one. */
+    data class Picked(val sizeBytes: Int, val version: String?) : FirmwareUpdate
+
+    data class Running(val progress: OtaProgress, val target: String?) : FirmwareUpdate
+
+    /** The board restarted and reports [version] as its firmware. */
+    data class Finished(val version: String?) : FirmwareUpdate
+
+    data class Failed(val reason: String) : FirmwareUpdate
 }
 
 /** Outcome of the last text sent to the board's screen. */
@@ -66,6 +91,9 @@ class DeviceViewModel @Inject constructor(
     private val address: String = checkNotNull(savedStateHandle["address"]) { "address nav argument missing" }
     private val manager = DeviceConnectionManager(clientFactory, viewModelScope)
     private val recorder = SessionRecorder(repository, clock)
+
+    private var pendingImage: FirmwareImage? = null
+    private var updateJob: Job? = null
 
     private val _state = MutableStateFlow(DeviceUiState(address, savedStateHandle["name"]))
     val state: StateFlow<DeviceUiState> = _state.asStateFlow()
@@ -153,6 +181,78 @@ class DeviceViewModel @Inject constructor(
         viewModelScope.launch { recorder.stop() }
     }
 
+    /** [bytes] is the picked file's content, or null when it could not be read. */
+    fun pickFirmware(bytes: ByteArray?) {
+        if (_state.value.firmware is FirmwareUpdate.Running) return
+        val image = bytes?.let(FirmwareImage::parse)
+        pendingImage = image
+        val next = when {
+            bytes == null -> FirmwareUpdate.Failed("The file could not be read")
+            image == null -> FirmwareUpdate.Failed("This is not an ESP32 firmware image (a .bin built for the board)")
+            else -> FirmwareUpdate.Picked(image.size, image.version)
+        }
+        _state.update { it.copy(firmware = next) }
+    }
+
+    fun startFirmwareUpdate() {
+        val image = pendingImage ?: return
+        if (_state.value.firmware is FirmwareUpdate.Running) return
+        val target = image.version
+        setFirmware(FirmwareUpdate.Running(OtaProgress.Starting, target))
+        appendLog("Firmware update started (${image.size} B)")
+        updateJob = viewModelScope.launch {
+            manager.updateFirmware(image).collect { progress ->
+                when (progress) {
+                    is OtaProgress.Failed -> {
+                        setFirmware(FirmwareUpdate.Failed(progress.reason))
+                        appendLog("Firmware update failed: ${progress.reason}")
+                    }
+
+                    OtaProgress.Restarting -> {
+                        setFirmware(FirmwareUpdate.Running(progress, target))
+                        awaitReboot(target)
+                    }
+
+                    else -> setFirmware(FirmwareUpdate.Running(progress, target))
+                }
+            }
+        }
+    }
+
+    /** Aborts a running transfer; the board keeps its old firmware. */
+    fun cancelFirmwareUpdate() {
+        val running = _state.value.firmware as? FirmwareUpdate.Running ?: return
+        if (running.progress == OtaProgress.Restarting) return
+        updateJob?.cancel()
+        setFirmware(FirmwareUpdate.Picked(pendingImage?.size ?: 0, pendingImage?.version))
+        appendLog("Firmware update cancelled")
+    }
+
+    fun dismissFirmware() {
+        if (_state.value.firmware is FirmwareUpdate.Running) return
+        pendingImage = null
+        setFirmware(FirmwareUpdate.None)
+    }
+
+    /** The board drops the link as it reboots; the manager reconnects, and the next Ready names the running firmware. */
+    private suspend fun awaitReboot(target: String?) {
+        val ready = withTimeoutOrNull(REBOOT_WAIT_MILLIS) {
+            manager.state.first { it !is ConnectionState.Ready }
+            manager.state.filterIsInstance<ConnectionState.Ready>().first()
+        }
+        val version = ready?.info?.firmware
+        val next = when {
+            ready == null -> FirmwareUpdate.Failed("The board did not come back after restarting")
+            target != null && version != target -> FirmwareUpdate.Failed("The board came back on ${version ?: "unknown firmware"}, not $target; it rolled back")
+            else -> FirmwareUpdate.Finished(version)
+        }
+        pendingImage = null
+        setFirmware(next)
+        appendLog(if (next is FirmwareUpdate.Finished) "Firmware updated to ${version ?: "new image"}" else "Firmware update failed")
+    }
+
+    private fun setFirmware(update: FirmwareUpdate) = _state.update { it.copy(firmware = update) }
+
     private fun appendLog(line: String) = _state.update { it.copy(log = (it.log + line).takeLast(LOG_SIZE)) }
 
     private fun reasonOf(e: Throwable): String = (e as? BleException)?.error?.message ?: e.message.orEmpty()
@@ -176,5 +276,6 @@ class DeviceViewModel @Inject constructor(
         const val LOG_SIZE = 40
         const val MOTION_SIZE = 150
         const val TOUCH_LOG_SIZE = 20
+        const val REBOOT_WAIT_MILLIS = 60_000L
     }
 }

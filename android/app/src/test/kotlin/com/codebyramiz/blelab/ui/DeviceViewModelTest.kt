@@ -12,6 +12,7 @@ import com.codebyramiz.blelab.ble.simulated.SimulatedPeripheral
 import com.codebyramiz.blelab.recording.FakeRecordingRepository
 import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.ui.device.DeviceViewModel
+import com.codebyramiz.blelab.ui.device.FirmwareUpdate
 import com.codebyramiz.blelab.ui.device.MessageStatus
 import com.codebyramiz.blelab.ui.device.Tilt
 import com.google.common.truth.Truth.assertThat
@@ -192,5 +193,72 @@ class DeviceViewModelTest {
         vm.stopRecording()
         runCurrent()
         assertThat(repository.sessions().first().single().endedAtMillis).isNotNull()
+    }
+
+    private fun image(size: Int = 20_000, revision: String = "ble-lab 1.2.0"): ByteArray {
+        val bytes = ByteArray(size) { (it % 251).toByte() }
+        bytes[0] = 0xE9.toByte()
+        revision.toByteArray().copyInto(bytes, 100)
+        return bytes
+    }
+
+    @Test
+    fun `a file that is not a firmware image is rejected`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(ByteArray(500))
+        assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Failed::class.java)
+        vm.pickFirmware(null)
+        assertThat((vm.state.value.firmware as FirmwareUpdate.Failed).reason).contains("could not be read")
+    }
+
+    @Test
+    fun `a picked image shows its size and version before anything is sent`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        assertThat(vm.state.value.canUpdateFirmware).isTrue()
+        vm.pickFirmware(image())
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(20_000, "ble-lab 1.2.0"))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `update streams the image, the board restarts and the new version is confirmed`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image())
+        vm.startFirmwareUpdate()
+        runCurrent()
+        assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Running::class.java)
+        advanceTimeBy(30_000)
+        assertThat(peripheral.otaCompleted).isEqualTo(1)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Finished("ble-lab 1.2.0"))
+        assertThat(vm.state.value.connection).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
+    fun `cancelling mid transfer leaves the board untouched and the file ready to retry`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image(size = 400_000))
+        vm.startFirmwareUpdate()
+        advanceTimeBy(300)
+        assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Running::class.java)
+        vm.cancelFirmwareUpdate()
+        advanceTimeBy(1_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(400_000, "ble-lab 1.2.0"))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `a board that came back on another version is reported as rolled back`() = vmTest(setUp = { peripheral.otaResultRevision = "ble-lab 1.1.0" }) { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image())
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        val failed = vm.state.value.firmware as FirmwareUpdate.Failed
+        assertThat(failed.reason).contains("rolled back")
+    }
+
+    @Test
+    fun `a board without the update service cannot be updated`() = vmTest(setUp = { peripheral = SimulatedPeripheral(supportsOta = false) }) { vm ->
+        advanceTimeBy(5_000)
+        assertThat(vm.state.value.canUpdateFirmware).isFalse()
     }
 }
