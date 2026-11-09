@@ -9,7 +9,11 @@
 
 #define DEVICE_NAME          "ble-lab-esp32"
 #define MANUFACTURER_NAME    "Espressif"
+#if defined(ARDUINO_M5STACK_CORES3)
+#define MODEL_NUMBER         "M5Stack CoreS3"
+#else
 #define MODEL_NUMBER         "ESP32-WROOM-32"
+#endif
 #define FIRMWARE_REVISION    "ble-lab 1.0.0"
 
 #define PREFERRED_MTU        247

@@ -75,8 +75,12 @@ arduino-cli lib install M5Unified@0.3.0
 arduino-cli compile --fqbn esp32:esp32:m5stack_cores3 firmware/ble_lab
 arduino-cli upload  --fqbn esp32:esp32:m5stack_cores3 -p /dev/cu.usbmodem<N> firmware/ble_lab
 ```
-CoreS3 build: 821,759 bytes of flash (26%), 31,952 bytes of RAM (9%).
-Compiled size: 1,101,323 bytes of flash (84% of the default partition), 41,340 bytes of RAM (12%).
+CoreS3 build: 826,911 bytes of flash (26%), 32,296 bytes of RAM (9%).
+
+Tested on hardware (CoreS3, firmware 1.0.0): a Pixel 4a (5G) on Android finds the board, connects (MTU 247),
+streams telemetry at 5 Hz, pairs on the first LED write, and switches the lamp on and off; the state is read back from
+the board's telemetry. A Mac running `bleak` passes the same checks.
+Compiled size: 1,101,367 bytes of flash (84% of the default partition), 41,340 bytes of RAM (12%).
 
 ## Android
 
