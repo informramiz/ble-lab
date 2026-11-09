@@ -14,6 +14,15 @@ public enum GattProfile {
     /// Write with response over an encrypted link (firmware 1.1.0+): UTF-8 text for the board's screen.
     public static let message = UUID(uuidString: "B1E1AB05-5A1E-4C3A-9F5E-C0DE00B1E1AB")!
 
+    /// OTA firmware update service (firmware 1.2.0+), see `OtaProtocol`. Every characteristic needs an encrypted, authenticated link.
+    public static let otaService = UUID(uuidString: "B1E1AB10-5A1E-4C3A-9F5E-C0DE00B1E1AB")!
+    /// Write with response: START, ABORT and FINISH commands.
+    public static let otaControl = UUID(uuidString: "B1E1AB11-5A1E-4C3A-9F5E-C0DE00B1E1AB")!
+    /// Write without response: the raw image bytes, in order.
+    public static let otaData = UUID(uuidString: "B1E1AB12-5A1E-4C3A-9F5E-C0DE00B1E1AB")!
+    /// Read + notify: 6 bytes, state, error and accepted offset.
+    public static let otaStatus = UUID(uuidString: "B1E1AB13-5A1E-4C3A-9F5E-C0DE00B1E1AB")!
+
     /// Device Information service and its characteristics, as 16-bit SIG-assigned numbers.
     public static let deviceInfoService: UInt16 = 0x180A
     public static let manufacturerName: UInt16 = 0x2A29
