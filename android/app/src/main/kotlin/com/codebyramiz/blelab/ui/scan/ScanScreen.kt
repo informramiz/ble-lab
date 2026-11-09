@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -224,7 +226,8 @@ private fun DeviceRow(device: ScannedDevice, onClick: () -> Unit, modifier: Modi
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = modifier.fillMaxWidth().testTag("device-${device.address}"),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
+        // Fixed minimum height and trailing width: a paired row (no signal) and a live row measure alike.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 76.dp).padding(16.dp)) {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(painterResource(R.drawable.ic_memory), contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -244,7 +247,7 @@ private fun DeviceRow(device: ScannedDevice, onClick: () -> Unit, modifier: Modi
                 }
                 Text(device.address, style = MonoStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.Center, modifier = Modifier.widthIn(min = 56.dp)) {
                 val rssi = device.rssi
                 if (rssi != null) {
                     RssiBars(rssi)
