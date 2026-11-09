@@ -19,11 +19,21 @@ public actor SimulatedPeripheral {
     private var notifying = false
     private var sequence: UInt32 = 0
     private var rng: SplitMix
+    private let notifyInterval: Duration?
+    private var ticker: Task<Void, Never>?
 
-    public init(id: UUID = SimulatedPeripheral.demoID, name: String = "BLE Lab (demo)", seed: UInt64 = 7) {
+    /// `notifyInterval` streams telemetry on its own while notifications are on, like the firmware
+    /// (200 ms). `nil` leaves it to `pushTelemetry()`, which keeps tests deterministic.
+    public init(
+        id: UUID = SimulatedPeripheral.demoID,
+        name: String = "BLE Lab (demo)",
+        seed: UInt64 = 7,
+        notifyInterval: Duration? = nil
+    ) {
         self.id = id
         self.name = name
         self.rng = SplitMix(seed: seed)
+        self.notifyInterval = notifyInterval
     }
 
     public func configure(connectFailures: Int = 0, requireBonding: Bool = false, acceptBonding: Bool = true) {
@@ -46,7 +56,7 @@ public actor SimulatedPeripheral {
 
     /// Simulates the radio dropping the link (supervision timeout, out of range).
     public func dropLink(reason: String = "supervision timeout") {
-        notifying = false
+        stopNotifying()
         continuation?.yield(.disconnected(.linkLost(reason: reason)))
         continuation?.finish()
         continuation = nil
@@ -88,10 +98,26 @@ public actor SimulatedPeripheral {
         ledOn = value.first != 0
     }
 
-    func setNotify(_ enabled: Bool) { notifying = enabled }
+    func setNotify(_ enabled: Bool) {
+        guard enabled else { return stopNotifying() }
+        notifying = true
+        guard let notifyInterval, ticker == nil else { return }
+        ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: notifyInterval)
+                guard let self, await self.pushTelemetry() else { return }
+            }
+        }
+    }
+
+    private func stopNotifying() {
+        notifying = false
+        ticker?.cancel()
+        ticker = nil
+    }
 
     func centralDisconnected() {
-        notifying = false
+        stopNotifying()
         continuation?.finish()
         continuation = nil
     }

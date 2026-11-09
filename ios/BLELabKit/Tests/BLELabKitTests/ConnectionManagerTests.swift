@@ -136,6 +136,20 @@ import Testing
         await link.disconnect()
         await #expect(throws: BLEError.notConnected) { try await link.discoverServices() }
     }
+
+    @Test func demoStreamsTelemetryOnItsOwnWhileNotifying() async throws {
+        let peripheral = SimulatedPeripheral(notifyInterval: .milliseconds(5))
+        let link = try await SimulatedCentral(peripheral: peripheral, latency: .zero, sleeper: RecordingSleeper()).connect(to: peripheral.id)
+        let events = (link as! SimulatedLink).events
+        try await link.setNotify(true, for: .custom(GattProfile.telemetry), in: .custom(GattProfile.labService))
+        var notifications = 0
+        for await event in events {
+            if case .notification = event { notifications += 1 }
+            if notifications == 3 { break }
+        }
+        #expect(notifications == 3)
+        await link.disconnect()
+    }
 }
 
 @Suite struct ErrorMappingTests {
