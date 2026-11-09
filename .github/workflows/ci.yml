@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Format, lint, unit and screenshot tests, coverage gate
+        run: ./gradlew spotlessCheck lint testDebugUnitTest verifyRoborazziDebug koverVerifyApp koverXmlReportApp assembleDebug
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-reports
+          path: |
+            android/**/build/reports/
+            android/app/build/outputs/roborazzi/
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install ESP32 core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.12
+      - name: Compile (no upload)
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all firmware/ble_lab
+
+  ios:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v7
+      - name: BLELabKit tests (macOS host, coverage)
+        run: swift test --package-path BLELabKit --enable-code-coverage
+      - name: Build app for the iOS Simulator
+        run: xcodebuild -project BLELab.xcodeproj -scheme BLELab -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build

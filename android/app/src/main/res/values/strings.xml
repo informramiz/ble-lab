@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BLE Lab</string>
+    <string name="scan_title">Nearby devices</string>
+    <string name="scan_subtitle">ESP32 GATT peripheral explorer</string>
+    <string name="scan_start">Scan</string>
+    <string name="scan_stop">Stop</string>
+    <string name="scan_scanning">Scanning…</string>
+    <string name="scan_idle">Tap scan to look for peripherals</string>
+    <string name="scan_filter_lab">BLE Lab only</string>
+    <string name="scan_empty">No devices yet. Power the ESP32 and keep it close.</string>
+    <string name="scan_demo_badge">Demo</string>
+    <string name="scan_lab_badge">BLE Lab</string>
+    <string name="scan_unnamed">Unnamed device</string>
+    <string name="scan_rssi">%1$d dBm</string>
+    <string name="permission_title">Bluetooth permission needed</string>
+    <string name="permission_body">BLE Lab needs Nearby devices access to scan for and connect to your ESP32. The demo device works without it.</string>
+    <string name="permission_body_legacy">Android 11 and older require location access to scan for Bluetooth devices. BLE Lab does not use your location.</string>
+    <string name="permission_grant">Grant access</string>
+    <string name="bluetooth_off_title">Bluetooth is off</string>
+    <string name="bluetooth_off_body">Turn on Bluetooth to find real devices. The demo device still works.</string>
+    <string name="bluetooth_turn_on">Turn on</string>
+    <string name="back">Back</string>
+    <string name="state_idle">Disconnected</string>
+    <string name="state_connecting">Connecting (attempt %1$d)</string>
+    <string name="state_discovering">Discovering services</string>
+    <string name="state_bonding">Pairing</string>
+    <string name="state_ready">Connected</string>
+    <string name="state_reconnecting">Retrying in %1$.1f s</string>
+    <string name="state_failed">Connection failed</string>
+    <string name="step_connect">Link</string>
+    <string name="step_mtu">MTU</string>
+    <string name="step_services">GATT</string>
+    <string name="step_notify">Notify</string>
+    <string name="telemetry_title">Live telemetry</string>
+    <string name="telemetry_waiting">Waiting for notifications…</string>
+    <string name="telemetry_value">%1$.2f °C</string>
+    <plurals name="telemetry_stats">
+        <item quantity="one">min %1$.1f · max %2$.1f · %3$d packet</item>
+        <item quantity="other">min %1$.1f · max %2$.1f · %3$d packets</item>
+    </plurals>
+    <string name="led_title">Onboard LED</string>
+    <string name="led_on">On</string>
+    <string name="led_off">Off</string>
+    <string name="led_hint">Write with response over an encrypted link. The first write pairs the phone.</string>
+    <string name="info_title">Device information</string>
+    <string name="info_manufacturer">Manufacturer</string>
+    <string name="info_model">Model</string>
+    <string name="info_firmware">Firmware</string>
+    <string name="info_mtu">ATT MTU</string>
+    <string name="info_address">Address</string>
+    <string name="info_unknown">—</string>
+    <string name="log_title">Event log</string>
+    <string name="retry">Try again</string>
+    <string name="reconnect_cause">%1$s</string>
+</resources>
