@@ -107,6 +107,11 @@ private struct StatusCard: View {
 private struct TelemetryCard: View {
     let model: DeviceModel
 
+    private var xDomain: ClosedRange<UInt32> {
+        let first = model.samples.first?.sequence ?? 0
+        return first...max(model.samples.last?.sequence ?? 0, first + 1)
+    }
+
     var body: some View {
         Card(title: "Live telemetry", symbol: "waveform.path.ecg") {
             HStack(alignment: .firstTextBaseline) {
@@ -132,6 +137,7 @@ private struct TelemetryCard: View {
                     .interpolationMethod(.catmullRom)
             }
             .chartYScale(domain: .automatic(includesZero: false))
+            .chartXScale(domain: xDomain)  // Automatic rounds the start down and leaves a gap on the left.
             .chartXAxis(.hidden)
             .frame(height: 170)
             .accessibilityIdentifier("telemetryChart")
