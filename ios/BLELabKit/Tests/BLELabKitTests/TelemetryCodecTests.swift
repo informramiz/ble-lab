@@ -35,3 +35,17 @@ import Testing
         #expect(TelemetryCodec.encodeLed(false) == Data([0]))
     }
 }
+
+@Suite struct TelemetryFlagTests {
+    @Test func decodesSensorFlags() throws {
+        let t = try TelemetryCodec.decode(Data([0, 0, 0, 0, 0, 0, 0x07]))
+        #expect(t.ledOn && t.hasMotionSensor && t.hasTouchScreen)
+        let plain = try TelemetryCodec.decode(Data([0, 0, 0, 0, 0, 0, 0x01]))
+        #expect(plain.ledOn && !plain.hasMotionSensor && !plain.hasTouchScreen)
+    }
+
+    @Test func flagsRoundTrip() throws {
+        let original = Telemetry(sequence: 1, value: 1, ledOn: false, hasMotionSensor: true, hasTouchScreen: true)
+        #expect(try TelemetryCodec.decode(TelemetryCodec.encode(original)) == original)
+    }
+}
