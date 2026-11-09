@@ -8,6 +8,8 @@ import com.codebyramiz.blelab.MainDispatcherRule
 import com.codebyramiz.blelab.ble.GattClientFactory
 import com.codebyramiz.blelab.ble.model.ConnectionState
 import com.codebyramiz.blelab.ble.model.TouchKind
+import com.codebyramiz.blelab.ble.ota.OtaSignatureVerifier
+import com.codebyramiz.blelab.ble.protocol.OtaError
 import com.codebyramiz.blelab.ble.simulated.SimulatedPeripheral
 import com.codebyramiz.blelab.recording.FakeRecordingRepository
 import com.codebyramiz.blelab.recording.RecordingState
@@ -29,7 +31,7 @@ import org.junit.Test
 class DeviceViewModelTest {
     @get:Rule val main = MainDispatcherRule()
 
-    private var peripheral = SimulatedPeripheral()
+    private var peripheral = SimulatedPeripheral(otaVerifier = TRUSTED_FIRST_BYTE)
     private val repository = FakeRecordingRepository()
     private var now = 10_000L
 
@@ -195,11 +197,14 @@ class DeviceViewModelTest {
         assertThat(repository.sessions().first().single().endedAtMillis).isNotNull()
     }
 
-    private fun image(size: Int = 20_000, revision: String = "ble-lab 1.2.0"): ByteArray {
+    /** A `.signed.bin` package; the stand-in verifier trusts signatures that start with 1, so [trusted] picks the key. */
+    private fun image(size: Int = 20_000, revision: String = "ble-lab 1.3.0", signed: Boolean = true, trusted: Boolean = true, versionCode: Long = 10_300): ByteArray {
         val bytes = ByteArray(size) { (it % 251).toByte() }
         bytes[0] = 0xE9.toByte()
         revision.toByteArray().copyInto(bytes, 100)
-        return bytes
+        if (!signed) return bytes
+        val signature = ByteArray(64).also { it[0] = if (trusted) 1 else 2 }
+        return "BLFW".toByteArray() + ByteArray(4) { (versionCode shr (8 * it)).toByte() } + signature + bytes
     }
 
     @Test
@@ -216,7 +221,7 @@ class DeviceViewModelTest {
         advanceTimeBy(5_000)
         assertThat(vm.state.value.canUpdateFirmware).isTrue()
         vm.pickFirmware(image())
-        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(20_000, "ble-lab 1.2.0"))
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(20_000, "ble-lab 1.3.0", signed = true))
         assertThat(peripheral.otaCompleted).isEqualTo(0)
     }
 
@@ -229,7 +234,7 @@ class DeviceViewModelTest {
         assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Running::class.java)
         advanceTimeBy(30_000)
         assertThat(peripheral.otaCompleted).isEqualTo(1)
-        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Finished("ble-lab 1.2.0"))
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Finished("ble-lab 1.3.0"))
         assertThat(vm.state.value.connection).isInstanceOf(ConnectionState.Ready::class.java)
     }
 
@@ -242,7 +247,7 @@ class DeviceViewModelTest {
         assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Running::class.java)
         vm.cancelFirmwareUpdate()
         advanceTimeBy(1_000)
-        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(400_000, "ble-lab 1.2.0"))
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(400_000, "ble-lab 1.3.0", signed = true))
         assertThat(peripheral.otaCompleted).isEqualTo(0)
     }
 
@@ -260,5 +265,40 @@ class DeviceViewModelTest {
     fun `a board without the update service cannot be updated`() = vmTest(setUp = { peripheral = SimulatedPeripheral(supportsOta = false) }) { vm ->
         advanceTimeBy(5_000)
         assertThat(vm.state.value.canUpdateFirmware).isFalse()
+    }
+
+    @Test
+    fun `a raw unsigned bin is shown as unsigned and the board refuses it`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image(signed = false))
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(20_000, "ble-lab 1.3.0", signed = false))
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Failed(OtaError.BadSignature.message))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `an image signed with the wrong key is refused with a clear reason`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image(trusted = false))
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Failed(OtaError.BadSignature.message))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `a downgrade is refused with a clear reason`() = vmTest(setUp = { peripheral.firmwareRevision = "ble-lab 1.4.0" }) { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image())
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Failed(OtaError.Downgrade.message))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    private companion object {
+        val TRUSTED_FIRST_BYTE = OtaSignatureVerifier { _, _, _, signature -> signature[0] == 1.toByte() }
     }
 }

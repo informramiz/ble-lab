@@ -53,6 +53,12 @@ fun FirmwareCard(state: DeviceUiState, actions: FirmwareActions) {
             update is FirmwareUpdate.Picked -> {
                 val version = update.version ?: stringResource(R.string.fw_version_unknown)
                 Text(stringResource(R.string.fw_file, version, formatBytes(update.sizeBytes)), modifier = Modifier.testTag("fwPicked"))
+                Text(
+                    stringResource(if (update.signed) R.string.fw_signed else R.string.fw_unsigned),
+                    color = if (update.signed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("fwSigned"),
+                )
                 Actions {
                     Button(onClick = actions.onStart, modifier = Modifier.testTag("fwStart")) { Text(stringResource(R.string.fw_start)) }
                     OutlinedButton(onClick = picker) { Text(stringResource(R.string.fw_choose_other)) }

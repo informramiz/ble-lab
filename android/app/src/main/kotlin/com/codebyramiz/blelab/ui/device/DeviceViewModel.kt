@@ -60,7 +60,7 @@ sealed interface FirmwareUpdate {
     data object None : FirmwareUpdate
 
     /** A valid image is chosen and waits for the user to start. [version] is null when the file does not name one. */
-    data class Picked(val sizeBytes: Int, val version: String?) : FirmwareUpdate
+    data class Picked(val sizeBytes: Int, val version: String?, val signed: Boolean) : FirmwareUpdate
 
     data class Running(val progress: OtaProgress, val target: String?) : FirmwareUpdate
 
@@ -189,7 +189,7 @@ class DeviceViewModel @Inject constructor(
         val next = when {
             bytes == null -> FirmwareUpdate.Failed("The file could not be read")
             image == null -> FirmwareUpdate.Failed("This is not an ESP32 firmware image (a .bin built for the board)")
-            else -> FirmwareUpdate.Picked(image.size, image.version)
+            else -> FirmwareUpdate.Picked(image.size, image.version, image.isSigned)
         }
         _state.update { it.copy(firmware = next) }
     }
@@ -224,7 +224,7 @@ class DeviceViewModel @Inject constructor(
         val running = _state.value.firmware as? FirmwareUpdate.Running ?: return
         if (running.progress == OtaProgress.Restarting) return
         updateJob?.cancel()
-        setFirmware(FirmwareUpdate.Picked(pendingImage?.size ?: 0, pendingImage?.version))
+        setFirmware(FirmwareUpdate.Picked(pendingImage?.size ?: 0, pendingImage?.version, pendingImage?.isSigned ?: false))
         appendLog("Firmware update cancelled")
     }
 
