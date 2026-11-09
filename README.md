@@ -22,7 +22,9 @@ Connect a phone to an ESP32 over Bluetooth Low Energy and use it as a small IoT 
   past sessions, open a session chart, and export it as CSV through the share sheet.
 - **No board needed**: a built-in simulated ESP32 shows up as a "demo" device.
 
-The Android app has all of this. The iOS app still has the original scan, telemetry and LED features.
+- **Signed over-the-air firmware update (Android)**: pick a signed `.signed.bin`; the app streams it over BLE, the board verifies an ECDSA P-256 signature and refuses unsigned, wrong-key and older images.
+
+The Android app has all of this. The iOS app has scan, telemetry, LED, motion, touch and messages, but not the firmware update yet.
 
 Both apps scan, connect, negotiate MTU, discover services, stream notifications into a live chart,
 write a characteristic, pair when the peripheral asks, and reconnect with exponential backoff.
@@ -40,10 +42,12 @@ you can use with no board at all.
 | Motion | `B1E1AB03-…-C0DE00B1E1AB` | notify (50 Hz, batched) | header 8 bytes little-endian: `u32 t_ms` (board clock at the first sample), `u16 first sample index` (wraps), `u8 count`, `u8 period_ms`; then `count × 12` bytes: `i16 ax, ay, az` in milli-g, `i16 gx, gy, gz` in 0.1 deg/s. Batch size follows the MTU (1 sample at MTU 23, up to 5) |
 | Touch | `B1E1AB04-…-C0DE00B1E1AB` | notify | 8 bytes little-endian: `u16 event index` (wraps), `u8 kind` (1 tap, 2 long press), `u8 flags` (bit 0 = injected from the serial console), `u16 x`, `u16 y` (pixels, 320×240) |
 | Message | `B1E1AB05-…-C0DE00B1E1AB` | **encrypted** write | UTF-8 text, 1 to 64 bytes, shown on the board screen |
+| OTA control / data / status | service `B1E1AB10-…`; control `…11`, data `…12`, status `…13` | **MITM-encrypted** write / write without response / read, notify | START `01`: `u32 size`, 32-byte SHA-256, `u32 version code`, 64-byte raw `r||s` signature (105 bytes); ABORT `02`; FINISH `03`. Status: `u8 state`, `u8 error`, `u32 offset`. New errors: 11 bad signature, 12 downgrade |
 | Device Information | `0x180A` | read | Manufacturer `0x2A29`, Model `0x2A24`, Firmware `0x2A26` |
 
-Preferred ATT MTU 247. The LED write needs an encrypted link, so the first write triggers
-"Just Works" pairing (no PIN; the board has no display or keypad). On chips with an internal
+Preferred ATT MTU 247. The LED and message writes need an encrypted link; the OTA writes need an authenticated one:
+the board shows a 6-digit passkey on its screen (display-only IO capability) and the phone asks for it, so a
+man-in-the-middle cannot pair. Boards bonded under the older "Just Works" firmware must be forgotten and paired again. On chips with an internal
 temperature sensor (S2, S3, C3, C6…) the value is the die temperature; the original ESP32 has none,
 so it streams a smooth synthetic wave around 24.
 
@@ -96,7 +100,7 @@ arduino-cli upload  --fqbn esp32:esp32:m5stack_cores3 -p /dev/cu.usbmodem<N> fir
 ```
 CoreS3 build (1.2.0): 1,333,323 bytes of flash (42% of a 3 MB slot), 33,456 bytes of RAM (10%).
 
-**Over-the-air update (1.2.0).** The CoreS3 partition scheme that arduino-cli picks by default,
+**Over-the-air update (1.3.0, signed).** The CoreS3 partition scheme that arduino-cli picks by default,
 `PartitionScheme=app3M_fat9M_16MB` ("16M Flash (3MB APP/9.9MB FATFS)", `app3M_fat9M_16MB.csv` in the core), has two
 3 MB app slots, `ota_0` at 0x10000 and `ota_1` at 0x310000, plus `otadata`. The firmware receives an image over BLE with
 the Arduino-ESP32 `Update` library, checks its SHA-256, reboots into the other slot and confirms the new image about 5 s
@@ -108,6 +112,17 @@ arduino-cli compile --fqbn esp32:esp32:m5stack_cores3:PartitionScheme=app3M_fat9
   --output-dir firmware/ble_lab/build firmware/ble_lab
 # update file: firmware/ble_lab/build/ble_lab.ino.bin   (not ...merged.bin, which includes the bootloader)
 ```
+
+**Signing.** The board only accepts images signed with the key whose public half is compiled in
+(`ota_public_key.h`). Version code is `major*10000 + minor*100 + patch`; a lower version than the running one is refused (anti-rollback).
+
+```sh
+python3 firmware/tools/sign_firmware.py keygen          # once; writes firmware/tools/keys/ota-dev-private.pem (git-ignored) and the public key header
+python3 firmware/tools/sign_firmware.py sign firmware/ble_lab/build/ble_lab.ino.bin   # -> ble_lab.ino.signed.bin, the file the app flashes
+```
+
+The signature covers `"BLFW1" | size | version | SHA-256(image)` and is checked before `Update.end`. This is a
+demo-grade scheme: production should use ESP-IDF Secure Boot v2 (bootloader-verified signatures) and flash encryption.
 
 The first OTA-capable build has to go over USB. The generic ESP32 build (`esp32:esp32:esp32`, 1,111,987 bytes) also
 fits the default two 1.25 MB slots, but the OTA path has only been designed against the CoreS3 scheme.
@@ -204,9 +219,9 @@ built-in demo peripheral: [`docs/screenshots/ios`](docs/screenshots/ios).
 
 | Suite | What it proves |
 |---|---|
-| Android `:ble` (65 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
-| Android `:app` (75 tests, 28 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
-| iOS `BLELabKit` (34 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing |
+| Android `:ble` (106 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
+| Android `:app` (84 tests, 28 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
+| iOS `BLELabKit` (78 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing |
 
 CI (`.github/workflows/ci.yml`): Android format, lint, unit and screenshot verification, Kover line
 coverage gate (80% minimum; currently 92.7% of lines, radio adapters excluded); firmware compile; iOS `swift test` and the simulator build.
