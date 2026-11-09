@@ -77,9 +77,11 @@ class DeviceViewModelTest {
     @Test
     fun `failed LED write rolls back and logs the reason`() = vmTest(setUp = {
         peripheral.requireBonding = true
-        peripheral.acceptBonding = false
     }) { vm ->
         advanceTimeBy(2_000)
+        // The bond is lost after connecting and the user then refuses to pair again.
+        peripheral.forgetBond()
+        peripheral.acceptBonding = false
         vm.setLed(true)
         advanceTimeBy(2_000)
         assertThat(vm.state.value.ledOn).isFalse()

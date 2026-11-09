@@ -40,6 +40,13 @@ interface GattClient {
 
     suspend fun connect()
 
+    /**
+     * True when the link is already encrypted with a stored bond, or the peripheral needs none.
+     * When false the manager pairs right after connecting, while the app is in the foreground:
+     * Android only shows a tap-to-pair notification for a pairing the peripheral starts itself.
+     */
+    val isBonded: Boolean
+
     /** Returns the MTU the peripheral agreed to. */
     suspend fun requestMtu(mtu: Int): Int
 

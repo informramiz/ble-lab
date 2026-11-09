@@ -149,6 +149,17 @@ class DeviceConnectionManager(
         }
 
         client.connect()
+        if (!client.isBonded) {
+            // Pair up front, in the foreground: left to the peripheral, Android only posts a
+            // "tap to pair" notification and the pairing times out. Reconnecting is paused
+            // because this runs inside the session, and a refusal ends it (BondingFailed is final).
+            _state.value = ConnectionState.Bonding(address)
+            try {
+                client.createBond()
+            } catch (e: BleException) {
+                throw BleException(BleError.BondingFailed)
+            }
+        }
         _state.value = ConnectionState.Discovering(address)
         val mtu = try {
             client.requestMtu(GattProfile.PREFERRED_MTU)

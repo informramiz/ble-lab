@@ -134,6 +134,12 @@ class AndroidGattClient(private val context: Context, private val address: Strin
         gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
     }
 
+    override val isBonded: Boolean
+        get() {
+            BlePermissionCheck.requireConnect(context)
+            return device.bondState == BluetoothDevice.BOND_BONDED
+        }
+
     override suspend fun requestMtu(mtu: Int): Int = operation { it.requestMtu(mtu) } as Int
 
     @Suppress("UNCHECKED_CAST")

@@ -59,6 +59,11 @@ class SimulatedPeripheral(
     @Volatile var bonded: Boolean = false
         private set
 
+    /** Drops the stored bond, as the user does by unpairing in system settings. */
+    fun forgetBond() {
+        bonded = false
+    }
+
     @Volatile var ledOn: Boolean = false
         private set
 
@@ -207,6 +212,8 @@ class SimulatedPeripheral(
             if (!supported) throw BleException(BleError.Gatt(GattStatus.GATT_FAILURE))
             notifying.value += characteristic
         }
+
+        override val isBonded: Boolean get() = bonded || !requireBonding
 
         override suspend fun createBond() {
             delay(latencyMillis * 4)
