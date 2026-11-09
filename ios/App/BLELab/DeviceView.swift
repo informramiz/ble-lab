@@ -2,21 +2,42 @@ import BLELabKit
 import Charts
 import SwiftUI
 
+private enum DeviceTab: String, CaseIterable, Identifiable {
+    case live = "Live", motion = "Motion", board = "Board"
+    var id: Self { self }
+}
+
 struct DeviceView: View {
     @State var model: DeviceModel
+    @State private var tab: DeviceTab = .live
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 StatusCard(state: model.state, onRetry: model.retry)
-                TelemetryCard(model: model)
-                LedCard(model: model)
-                InfoCard(model: model)
-                LogCard(lines: model.log)
+                Picker("Section", selection: $tab) {
+                    ForEach(DeviceTab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("tabPicker")
+                switch tab {
+                case .live:
+                    RecordingCard(model: model)
+                    TelemetryCard(model: model)
+                    LedCard(model: model)
+                    InfoCard(model: model)
+                    LogCard(lines: model.log)
+                case .motion: MotionTab(model: model)
+                case .board: BoardTab(model: model)
+                }
             }
             .padding()
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemGroupedBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if tab == .board { BoardComposeBar(model: model) }
+        }
         .navigationTitle(model.device.name ?? "Device")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: model.state, initial: true) { _, state in model.observe(state) }
@@ -25,7 +46,7 @@ struct DeviceView: View {
     }
 }
 
-private struct Card<Content: View>: View {
+struct DeviceCard<Content: View>: View {
     let title: String
     let symbol: String
     @ViewBuilder var content: Content
@@ -115,7 +136,7 @@ private struct TelemetryCard: View {
     }
 
     var body: some View {
-        Card(title: "Live telemetry", symbol: "waveform.path.ecg") {
+        DeviceCard(title: "Live telemetry", symbol: "waveform.path.ecg") {
             HStack(alignment: .firstTextBaseline) {
                 Text(model.latest.map { String(format: "%.2f", $0.value) } ?? "--")
                     .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
@@ -151,7 +172,7 @@ private struct LedCard: View {
     let model: DeviceModel
 
     var body: some View {
-        Card(title: "Onboard LED", symbol: "lightbulb") {
+        DeviceCard(title: "Onboard LED", symbol: "lightbulb") {
             HStack {
                 Image(systemName: model.ledOn ? "lightbulb.max.fill" : "lightbulb")
                     .font(.largeTitle)
@@ -179,7 +200,7 @@ private struct InfoCard: View {
     let model: DeviceModel
 
     var body: some View {
-        Card(title: "Device information", symbol: "info.circle") {
+        DeviceCard(title: "Device information", symbol: "info.circle") {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 row("Manufacturer", info?.manufacturer)
                 row("Model", info?.model)
@@ -206,10 +227,47 @@ private struct LogCard: View {
     let lines: [String]
 
     var body: some View {
-        Card(title: "Event log", symbol: "list.bullet.rectangle") {
+        DeviceCard(title: "Event log", symbol: "list.bullet.rectangle") {
             ForEach(Array(lines.suffix(6).reversed().enumerated()), id: \.offset) { _, line in
                 Text(line).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private struct RecordingCard: View {
+    let model: DeviceModel
+
+    var body: some View {
+        if model.recorder != nil {
+            DeviceCard(title: "Recording", symbol: "record.circle") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.isRecording ? "Recording" : "Record session").font(.headline)
+                        Text(counts).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await model.toggleRecording() }
+                    } label: {
+                        Label(model.isRecording ? "Stop and save" : "Record", systemImage: model.isRecording ? "stop.fill" : "circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(model.isRecording ? .red : .accentColor)
+                    .disabled(!model.canWrite && !model.isRecording)
+                    .accessibilityIdentifier("recordButton")
+                }
+                if !model.isRecording {
+                    Text("Store telemetry and motion on this phone").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var counts: String {
+        if case .recording(_, _, let telemetry, let motion) = model.recorder?.state ?? .idle {
+            return "\(telemetry) readings · \(motion) motion samples"
+        }
+        return "Not recording"
     }
 }

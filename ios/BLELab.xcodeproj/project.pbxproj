@@ -7,9 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		21363E10DB4ED96461A93566 /* BoardTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BB6D9B64E6CF733299F366 /* BoardTab.swift */; };
+		24D732AB4D91F7495C172918 /* StoredModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D939B45FBE8A145111ED0FED /* StoredModels.swift */; };
 		27E970F574599FDBAF6D7B19 /* BLELabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A50E663D2F23B9841E474B /* BLELabApp.swift */; };
 		2A7CFE5F36406AE1F1B3763B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */; };
+		5E5660EB1786D6ACC8FEAEDE /* MotionTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DEC3452DC99F94D8BAFE330 /* MotionTab.swift */; };
 		7308E9B40FC1AA2269A6D3D2 /* BLELabKit in Frameworks */ = {isa = PBXBuildFile; productRef = AF2AE5F417CCA1B285846D3F /* BLELabKit */; };
+		929E5B01AAE13B0AB9930A2C /* AxisChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CF5050940D8AD4A52C0243 /* AxisChart.swift */; };
+		98BDA6777F3752B8369AD9D9 /* SwiftDataRecordingRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE087B4E602B19A456FD0FB /* SwiftDataRecordingRepository.swift */; };
+		C4156C11C73CDFCE4F23C234 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AF27D26CF4642CD88696E0 /* HistoryView.swift */; };
 		C540BB7DC30F81296A130780 /* DeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4A9A036460BFA981444782 /* DeviceView.swift */; };
 		F1073FC8C996462A7D33D0B6 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A35523AC29E0F919D28F9A5B /* ScanView.swift */; };
 /* End PBXBuildFile section */
@@ -18,9 +24,15 @@
 		18E3CCBF63E73B84FA9D25EB /* BLELab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BLELab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3449E5049A04464FEE0247EE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		37CF5050940D8AD4A52C0243 /* AxisChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AxisChart.swift; sourceTree = "<group>"; };
 		45A50E663D2F23B9841E474B /* BLELabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLELabApp.swift; sourceTree = "<group>"; };
+		4DEC3452DC99F94D8BAFE330 /* MotionTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionTab.swift; sourceTree = "<group>"; };
+		60BB6D9B64E6CF733299F366 /* BoardTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardTab.swift; sourceTree = "<group>"; };
 		8FD63F2E2BC5C3CCED378B04 /* BLELabKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = BLELabKit; path = BLELabKit; sourceTree = SOURCE_ROOT; };
+		9DE087B4E602B19A456FD0FB /* SwiftDataRecordingRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftDataRecordingRepository.swift; sourceTree = "<group>"; };
 		A35523AC29E0F919D28F9A5B /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		B1AF27D26CF4642CD88696E0 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		D939B45FBE8A145111ED0FED /* StoredModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredModels.swift; sourceTree = "<group>"; };
 		FE4A9A036460BFA981444782 /* DeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -52,14 +64,28 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		59A6C41466EED49DFD50B91A /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				D939B45FBE8A145111ED0FED /* StoredModels.swift */,
+				9DE087B4E602B19A456FD0FB /* SwiftDataRecordingRepository.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
 		6DC20EE0608964D2CA58F1F3 /* BLELab */ = {
 			isa = PBXGroup;
 			children = (
 				28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */,
+				37CF5050940D8AD4A52C0243 /* AxisChart.swift */,
 				45A50E663D2F23B9841E474B /* BLELabApp.swift */,
+				60BB6D9B64E6CF733299F366 /* BoardTab.swift */,
 				FE4A9A036460BFA981444782 /* DeviceView.swift */,
+				B1AF27D26CF4642CD88696E0 /* HistoryView.swift */,
 				3449E5049A04464FEE0247EE /* Info.plist */,
+				4DEC3452DC99F94D8BAFE330 /* MotionTab.swift */,
 				A35523AC29E0F919D28F9A5B /* ScanView.swift */,
+				59A6C41466EED49DFD50B91A /* Persistence */,
 			);
 			path = BLELab;
 			sourceTree = "<group>";
@@ -157,9 +183,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				929E5B01AAE13B0AB9930A2C /* AxisChart.swift in Sources */,
 				27E970F574599FDBAF6D7B19 /* BLELabApp.swift in Sources */,
+				21363E10DB4ED96461A93566 /* BoardTab.swift in Sources */,
 				C540BB7DC30F81296A130780 /* DeviceView.swift in Sources */,
+				C4156C11C73CDFCE4F23C234 /* HistoryView.swift in Sources */,
+				5E5660EB1786D6ACC8FEAEDE /* MotionTab.swift in Sources */,
 				F1073FC8C996462A7D33D0B6 /* ScanView.swift in Sources */,
+				24D732AB4D91F7495C172918 /* StoredModels.swift in Sources */,
+				98BDA6777F3752B8369AD9D9 /* SwiftDataRecordingRepository.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

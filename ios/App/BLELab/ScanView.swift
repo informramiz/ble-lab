@@ -4,6 +4,7 @@ import SwiftUI
 struct ScanView: View {
     @State var model: ScanModel
     let central: any BLECentral
+    let repository: any RecordingRepository
     @State private var selection: ScannedDevice?
 
     var body: some View {
@@ -44,6 +45,12 @@ struct ScanView: View {
             }
             .navigationTitle("BLE Lab")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        HistoryView(model: HistoryModel(repository: repository))
+                    } label: { Label("History", systemImage: "clock.arrow.circlepath") }
+                        .accessibilityIdentifier("historyButton")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button(model.isScanning ? "Stop" : "Scan") {
                         model.isScanning ? model.stop() : model.start()
@@ -52,7 +59,11 @@ struct ScanView: View {
                 }
             }
             .navigationDestination(item: $selection) { device in
-                DeviceView(model: DeviceModel(device: device, manager: ConnectionManager(central: central)))
+                DeviceView(model: DeviceModel(
+                    device: device,
+                    manager: ConnectionManager(central: central),
+                    recorder: SessionRecorder(repository: repository)
+                ))
             }
             .task { model.start() }
         }

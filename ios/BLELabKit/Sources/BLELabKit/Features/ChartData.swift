@@ -49,3 +49,9 @@ public enum Series {
     /// X, Y and Z rotation rate (deg/s) as three parallel series.
     public static func rotation(_ motion: [MotionPoint]) -> [[Float]] { [motion.map(\.gx), motion.map(\.gy), motion.map(\.gz)] }
 }
+
+extension Series {
+    /// Live-window variants, for samples that have not been recorded.
+    public static func acceleration(_ samples: [MotionSample]) -> [[Float]] { [samples.map(\.ax), samples.map(\.ay), samples.map(\.az)] }
+    public static func rotation(_ samples: [MotionSample]) -> [[Float]] { [samples.map(\.gx), samples.map(\.gy), samples.map(\.gz)] }
+}
