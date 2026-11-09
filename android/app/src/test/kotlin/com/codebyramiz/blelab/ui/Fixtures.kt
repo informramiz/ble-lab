@@ -19,7 +19,6 @@ import com.codebyramiz.blelab.ui.history.SessionDetailUiState
 import com.codebyramiz.blelab.ui.scan.ScanUiState
 import kotlin.math.PI
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /** Deterministic UI states shared by the Compose tests and the Roborazzi screenshots. */
 object Fixtures {
@@ -126,7 +125,7 @@ object Fixtures {
         loading = false,
         session = session,
         temperature = samples,
-        acceleration = motion.map { sqrt(it.ax * it.ax + it.ay * it.ay + it.az * it.az) },
-        rotation = motion.map { sqrt(it.gx * it.gx + it.gy * it.gy + it.gz * it.gz) },
+        acceleration = listOf(motion.map { it.ax }, motion.map { it.ay }, motion.map { it.az }),
+        rotation = listOf(motion.map { it.gx }, motion.map { it.gy }, motion.map { it.gz }),
     )
 }

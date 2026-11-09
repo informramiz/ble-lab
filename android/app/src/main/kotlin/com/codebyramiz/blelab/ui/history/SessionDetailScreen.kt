@@ -29,7 +29,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codebyramiz.blelab.R
+import com.codebyramiz.blelab.ui.components.AxesChart
+import com.codebyramiz.blelab.ui.components.ChartScale
 import com.codebyramiz.blelab.ui.components.LiveChart
+import com.codebyramiz.blelab.ui.components.YAxisChart
+import com.codebyramiz.blelab.ui.components.formatAxis
 import com.codebyramiz.blelab.ui.components.SectionCard
 import com.codebyramiz.blelab.ui.components.SectionTitle
 import com.codebyramiz.blelab.ui.theme.MonoStyle
@@ -88,8 +92,8 @@ fun SessionDetailScreen(state: SessionDetailUiState, onBack: () -> Unit, onExpor
             ) {
                 Text(sessionSummary(state.session), style = MaterialTheme.typography.titleMedium)
                 SeriesCard(R.drawable.ic_sensors, R.string.telemetry_title, state.temperature, R.string.session_no_telemetry, "telemetryChart")
-                SeriesCard(R.drawable.ic_motion, R.string.motion_title_accel, state.acceleration, R.string.session_no_motion, "accelerationChart")
-                SeriesCard(R.drawable.ic_motion, R.string.motion_title_gyro, state.rotation, R.string.session_no_motion, "rotationChart")
+                AxesSeriesCard(R.string.motion_title_accel, state.acceleration, ACCEL_MIN_EXTENT, decimals = 1, "accelerationChart")
+                AxesSeriesCard(R.string.motion_title_gyro, state.rotation, GYRO_MIN_EXTENT, decimals = 0, "rotationChart")
             }
         }
     }
@@ -102,7 +106,25 @@ private fun SeriesCard(icon: Int, title: Int, values: List<Float>, emptyText: In
         if (values.size < 2) {
             Text(stringResource(emptyText), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            LiveChart(values, Modifier.fillMaxWidth().height(140.dp), capacity = values.size)
+            val range = ChartScale.fit(values)
+            YAxisChart(top = formatAxis(range.max, 1), bottom = formatAxis(range.min, 1), modifier = Modifier.fillMaxWidth().height(140.dp)) {
+                LiveChart(values, Modifier.fillMaxSize(), capacity = values.size)
+            }
         }
     }
 }
+
+@Composable
+private fun AxesSeriesCard(title: Int, series: List<List<Float>>, minExtent: Float, decimals: Int, tag: String) {
+    SectionCard(Modifier.testTag(tag)) {
+        SectionTitle(R.drawable.ic_motion, stringResource(title))
+        if ((series.firstOrNull()?.size ?: 0) < 2) {
+            Text(stringResource(R.string.session_no_motion), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            AxesChart(series, capacity = series.first().size, minExtent = minExtent, decimals = decimals)
+        }
+    }
+}
+
+private const val ACCEL_MIN_EXTENT = 1f
+private const val GYRO_MIN_EXTENT = 50f

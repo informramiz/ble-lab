@@ -56,7 +56,7 @@ class HistoryViewModelTest {
         assertThat(state.loading).isFalse()
         assertThat(state.notFound).isFalse()
         assertThat(state.temperature).containsExactly(20f, 21f).inOrder()
-        assertThat(state.acceleration).containsExactly(5f)
+        assertThat(state.acceleration).containsExactly(listOf(3f), listOf(4f), listOf(0f)).inOrder()
         assertThat(state.rotation).containsExactly(2f)
         val (name, csv) = checkNotNull(vm.csv())
         assertThat(name).isEqualTo("ble-lab-session-$id.csv")

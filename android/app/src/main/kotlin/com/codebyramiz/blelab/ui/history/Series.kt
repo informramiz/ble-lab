@@ -1,7 +1,6 @@
 package com.codebyramiz.blelab.ui.history
 
 import com.codebyramiz.blelab.recording.MotionPoint
-import kotlin.math.sqrt
 
 /** Chart-ready series derived from stored rows. */
 object Series {
@@ -13,9 +12,9 @@ object Series {
         return List(max) { i -> items[(i.toLong() * (items.size - 1) / (max - 1)).toInt()] }
     }
 
-    fun accelerationMagnitude(motion: List<MotionPoint>): List<Float> = motion.map { magnitude(it.ax, it.ay, it.az) }
+    /** X, Y and Z acceleration (g) as three parallel series. */
+    fun acceleration(motion: List<MotionPoint>): List<List<Float>> = listOf(motion.map { it.ax }, motion.map { it.ay }, motion.map { it.az })
 
-    fun rotationMagnitude(motion: List<MotionPoint>): List<Float> = motion.map { magnitude(it.gx, it.gy, it.gz) }
-
-    private fun magnitude(x: Float, y: Float, z: Float) = sqrt(x * x + y * y + z * z)
+    /** X, Y and Z rotation rate (deg/s) as three parallel series. */
+    fun rotation(motion: List<MotionPoint>): List<List<Float>> = listOf(motion.map { it.gx }, motion.map { it.gy }, motion.map { it.gz })
 }

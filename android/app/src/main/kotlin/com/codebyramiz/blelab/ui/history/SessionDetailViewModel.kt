@@ -18,8 +18,9 @@ data class SessionDetailUiState(
     val loading: Boolean = true,
     val session: RecordingSession? = null,
     val temperature: List<Float> = emptyList(),
-    val acceleration: List<Float> = emptyList(),
-    val rotation: List<Float> = emptyList(),
+    /** One series per axis (X, Y, Z); empty when nothing was recorded. */
+    val acceleration: List<List<Float>> = emptyList(),
+    val rotation: List<List<Float>> = emptyList(),
 ) {
     val notFound: Boolean get() = !loading && session == null
 }
@@ -44,8 +45,8 @@ class SessionDetailViewModel @Inject constructor(savedStateHandle: SavedStateHan
                     loading = false,
                     session = loaded.session,
                     temperature = Series.downsample(loaded.telemetry.map { it.value }),
-                    acceleration = Series.downsample(Series.accelerationMagnitude(loaded.motion)),
-                    rotation = Series.downsample(Series.rotationMagnitude(loaded.motion)),
+                    acceleration = Series.acceleration(loaded.motion).map { Series.downsample(it) },
+                    rotation = Series.rotation(loaded.motion).map { Series.downsample(it) },
                 )
             }
         }

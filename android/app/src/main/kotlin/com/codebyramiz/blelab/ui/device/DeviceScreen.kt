@@ -72,7 +72,10 @@ import com.codebyramiz.blelab.ble.model.TouchKind
 import com.codebyramiz.blelab.ble.protocol.MessageCodec
 import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.ui.components.LiveChart
-import com.codebyramiz.blelab.ui.components.MultiLineChart
+import com.codebyramiz.blelab.ui.components.AxesChart
+import com.codebyramiz.blelab.ui.components.ChartScale
+import com.codebyramiz.blelab.ui.components.YAxisChart
+import com.codebyramiz.blelab.ui.components.formatAxis
 import com.codebyramiz.blelab.ui.components.PipelineStepper
 import com.codebyramiz.blelab.ui.components.SectionCard
 import com.codebyramiz.blelab.ui.components.SectionTitle
@@ -238,35 +241,26 @@ private fun MotionTab(state: DeviceUiState) {
             }
         }
     }
-    AxesCard(R.string.motion_title_accel, state.motion.map { listOf(it.ax, it.ay, it.az) }, "accelCard")
-    AxesCard(R.string.motion_title_gyro, state.motion.map { listOf(it.gx, it.gy, it.gz) }, "gyroCard")
+    AxesCard(R.string.motion_title_accel, state.motion.map { listOf(it.ax, it.ay, it.az) }, ACCEL_MIN_EXTENT, decimals = 1, "accelCard")
+    AxesCard(R.string.motion_title_gyro, state.motion.map { listOf(it.gx, it.gy, it.gz) }, GYRO_MIN_EXTENT, decimals = 0, "gyroCard")
 }
 
 @Composable
-private fun AxesCard(title: Int, samples: List<List<Float>>, tag: String) {
-    val colors = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.secondary)
-    val labels = listOf(R.string.motion_axis_x, R.string.motion_axis_y, R.string.motion_axis_z)
+private fun AxesCard(title: Int, samples: List<List<Float>>, minExtent: Float, decimals: Int, tag: String) {
     SectionCard(Modifier.testTag(tag)) {
         SectionTitle(R.drawable.ic_motion, stringResource(title))
-        MultiLineChart(
+        AxesChart(
             series = List(AXES) { axis -> samples.map { it[axis] } },
-            colors = colors,
             capacity = DeviceViewModel.MOTION_SIZE,
-            modifier = Modifier.fillMaxWidth().height(140.dp),
+            minExtent = minExtent,
+            decimals = decimals,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            labels.forEachIndexed { i, label ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).background(colors[i], CircleShape))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
     }
 }
 
 private const val AXES = 3
+private const val ACCEL_MIN_EXTENT = 1f
+private const val GYRO_MIN_EXTENT = 50f
 
 @Composable
 private fun BoardTab(state: DeviceUiState, onLedChange: (Boolean) -> Unit, onSendMessage: (String) -> Unit) {
@@ -360,7 +354,10 @@ private fun TelemetryCard(state: DeviceUiState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        LiveChart(state.samples, Modifier.fillMaxWidth().height(160.dp), capacity = DeviceViewModel.CHART_SIZE)
+        val range = ChartScale.fit(state.samples)
+        YAxisChart(top = formatAxis(range.max, 1), bottom = formatAxis(range.min, 1), modifier = Modifier.fillMaxWidth().height(160.dp)) {
+            LiveChart(state.samples, Modifier.fillMaxSize(), capacity = DeviceViewModel.CHART_SIZE)
+        }
     }
 }
 
