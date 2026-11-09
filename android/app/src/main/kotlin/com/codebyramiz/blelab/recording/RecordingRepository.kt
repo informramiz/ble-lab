@@ -10,6 +10,12 @@ interface RecordingRepository {
 
     suspend fun finish(sessionId: Long, endedAtMillis: Long)
 
+    /**
+     * Ends every session that was never finished (the app was killed mid-recording) at its last
+     * sample. Call once at process start, before any new recording can begin.
+     */
+    suspend fun closeOrphans()
+
     fun sessions(): Flow<List<RecordingSession>>
 
     suspend fun load(sessionId: Long): SessionData?

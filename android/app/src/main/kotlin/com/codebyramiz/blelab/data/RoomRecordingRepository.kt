@@ -19,6 +19,8 @@ class RoomRecordingRepository(private val dao: RecordingDao) : RecordingReposito
 
     override suspend fun finish(sessionId: Long, endedAtMillis: Long) = dao.finish(sessionId, endedAtMillis)
 
+    override suspend fun closeOrphans() = dao.closeOrphans()
+
     override fun sessions(): Flow<List<RecordingSession>> = dao.observeSessions().map { rows -> rows.map { it.toModel() } }
 
     override suspend fun load(sessionId: Long): SessionData? {

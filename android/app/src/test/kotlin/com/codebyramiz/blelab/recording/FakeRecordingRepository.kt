@@ -34,6 +34,14 @@ class FakeRecordingRepository : RecordingRepository {
         store.value = store.value.toMap()
     }
 
+    override suspend fun closeOrphans() {
+        store.value.values.filter { it.session.endedAtMillis == null }.forEach {
+            val last = maxOf(it.telemetry.maxOfOrNull { p -> p.tMillis } ?: 0L, it.motion.maxOfOrNull { p -> p.tMillis } ?: 0L)
+            it.session = it.session.copy(endedAtMillis = it.session.startedAtMillis + last)
+        }
+        store.value = store.value.toMap()
+    }
+
     override fun sessions(): Flow<List<RecordingSession>> = store.map { map -> map.values.map { it.summary() }.sortedByDescending { it.startedAtMillis } }
 
     override suspend fun load(sessionId: Long): SessionData? = store.value[sessionId]?.let { SessionData(it.summary(), it.telemetry.toList(), it.motion.toList()) }

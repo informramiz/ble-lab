@@ -80,4 +80,20 @@ class RoomRecordingRepositoryTest {
     fun `loading an unknown session returns null`() = runBlocking {
         assertThat(repository.load(99)).isNull()
     }
+
+    @Test
+    fun `closeOrphans ends open sessions at their last sample and leaves finished ones`() = runBlocking {
+        val open = repository.start("AA", null, 1_000)
+        repository.append(open, listOf(TelemetryPoint(300, 20f, false)), listOf(MotionPoint(900, 0f, 0f, 1f, 0f, 0f, 0f)))
+        val empty = repository.start("BB", null, 5_000)
+        val done = repository.start("CC", null, 7_000)
+        repository.append(done, listOf(TelemetryPoint(50, 20f, false)), emptyList())
+        repository.finish(done, 8_000)
+
+        repository.closeOrphans()
+
+        assertThat(repository.load(open)!!.session.endedAtMillis).isEqualTo(1_900)
+        assertThat(repository.load(empty)!!.session.endedAtMillis).isEqualTo(5_000)
+        assertThat(repository.load(done)!!.session.endedAtMillis).isEqualTo(8_000)
+    }
 }

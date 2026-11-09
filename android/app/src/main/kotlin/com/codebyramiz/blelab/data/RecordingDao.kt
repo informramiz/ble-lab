@@ -19,6 +19,17 @@ interface RecordingDao {
     @Query("UPDATE sessions SET endedAtMillis = :endedAtMillis WHERE id = :sessionId")
     suspend fun finish(sessionId: Long, endedAtMillis: Long)
 
+    /** Sample times are relative to the session start, so the end is start plus the latest sample time. */
+    @Query(
+        """
+        UPDATE sessions SET endedAtMillis = startedAtMillis + MAX(
+            COALESCE((SELECT MAX(tMillis) FROM telemetry t WHERE t.sessionId = sessions.id), 0),
+            COALESCE((SELECT MAX(tMillis) FROM motion m WHERE m.sessionId = sessions.id), 0)
+        ) WHERE endedAtMillis IS NULL
+        """,
+    )
+    suspend fun closeOrphans()
+
     @Query(
         """
         SELECT s.id, s.startedAtMillis, s.endedAtMillis, s.deviceName, s.deviceAddress,
