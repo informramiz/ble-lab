@@ -108,8 +108,10 @@ private struct TelemetryCard: View {
     let model: DeviceModel
 
     private var xDomain: ClosedRange<UInt32> {
+        // The firmware's UInt32 counter can wrap; never add past .max and never let upper < lower.
         let first = model.samples.first?.sequence ?? 0
-        return first...max(model.samples.last?.sequence ?? 0, first + 1)
+        let last = model.samples.last?.sequence ?? first
+        return first...max(last, first == .max ? first : first + 1)
     }
 
     var body: some View {
