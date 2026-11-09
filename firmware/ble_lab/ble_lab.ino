@@ -12,8 +12,9 @@
 #include <BLESecurity.h>
 #include <math.h>
 #include "gatt_profile.h"
+#include "board_display.h"
 
-#ifndef LED_BUILTIN
+#if !BOARD_HAS_DISPLAY && !defined(LED_BUILTIN)
 #define LED_BUILTIN 2  // Most ESP32 DevKit v1 boards wire the blue LED to GPIO2.
 #endif
 
@@ -24,10 +25,16 @@ static volatile bool connected = false;
 static bool ledOn = false;
 static uint32_t sequence = 0;
 static uint32_t lastNotifyMs = 0;
+static volatile bool screenDirty = true;
+static int16_t lastValueX100 = 0;
+static uint32_t lastDrawMs = 0;
 
 static void setLed(bool on) {
   ledOn = on;
+#if !BOARD_HAS_DISPLAY
   digitalWrite(LED_BUILTIN, on ? HIGH : LOW);
+#endif
+  screenDirty = true;
   uint8_t value = on ? 1 : 0;
   ledChar->setValue(&value, 1);
 }
@@ -45,6 +52,7 @@ static int16_t readValueX100() {
 
 static void encodeTelemetry(uint8_t *out) {
   int16_t value = readValueX100();
+  lastValueX100 = value;
   out[0] = sequence & 0xFF;
   out[1] = (sequence >> 8) & 0xFF;
   out[2] = (sequence >> 16) & 0xFF;
@@ -57,10 +65,12 @@ static void encodeTelemetry(uint8_t *out) {
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *s) override {
     connected = true;
+    screenDirty = true;
     Serial.println("central connected");
   }
   void onDisconnect(BLEServer *s) override {
     connected = false;
+    screenDirty = true;
     Serial.println("central disconnected; advertising again");
     // advertiseOnDisconnect(true) restarts advertising, so the phone's backoff loop can reconnect.
   }
@@ -108,7 +118,10 @@ static void addLabService() {
 
 void setup() {
   Serial.begin(115200);
+  board_display::begin();
+#if !BOARD_HAS_DISPLAY
   pinMode(LED_BUILTIN, OUTPUT);
+#endif
 
   BLEDevice::init(DEVICE_NAME);
   BLEDevice::setMTU(PREFERRED_MTU);
@@ -144,6 +157,13 @@ void loop() {
     telemetryChar->setValue(payload, TELEMETRY_LENGTH);
     telemetryChar->notify();  // No-op for a central that has not enabled the CCCD.
     sequence++;
+  }
+  // Redraw on state changes, and twice a second for the live reading. Never from BLE callbacks.
+  if (BOARD_HAS_DISPLAY && (screenDirty || now - lastDrawMs >= 500)) {
+    if (!connected) lastValueX100 = readValueX100();
+    screenDirty = false;
+    lastDrawMs = now;
+    board_display::draw(connected, ledOn, lastValueX100, sequence);
   }
   delay(5);
 }

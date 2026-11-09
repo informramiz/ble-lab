@@ -34,15 +34,21 @@ jobs:
 
   firmware:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        fqbn: [esp32:esp32:esp32, esp32:esp32:m5stack_cores3]
+    env:
+      ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: https://espressif.github.io/arduino-esp32/package_esp32_index.json
     steps:
       - uses: actions/checkout@v7
       - uses: arduino/setup-arduino-cli@v2
-      - name: Install ESP32 core
+      - name: Install ESP32 core and display library
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.12
-      - name: Compile (no upload)
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all firmware/ble_lab
+          arduino-cli lib install M5Unified@0.3.0
+      - name: Compile ${{ matrix.fqbn }} (no upload)
+        run: arduino-cli compile --fqbn ${{ matrix.fqbn }} --warnings all firmware/ble_lab
 
   ios:
     runs-on: macos-26

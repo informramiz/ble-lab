@@ -66,6 +66,16 @@ arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
 ```
 
 The onboard LED is assumed to be on GPIO 2 (ESP32 DevKit v1); boards that define `LED_BUILTIN` use theirs.
+
+**M5Stack CoreS3** (ESP32-S3, screen, battery): install the display library, then build with the CoreS3 board id.
+The screen shows the connection state, the live die temperature, and a lamp that the app's LED switch turns on and off.
+
+```sh
+arduino-cli lib install M5Unified@0.3.0
+arduino-cli compile --fqbn esp32:esp32:m5stack_cores3 firmware/ble_lab
+arduino-cli upload  --fqbn esp32:esp32:m5stack_cores3 -p /dev/cu.usbmodem<N> firmware/ble_lab
+```
+CoreS3 build: 821,759 bytes of flash (26%), 31,952 bytes of RAM (9%).
 Compiled size: 1,101,323 bytes of flash (84% of the default partition), 41,340 bytes of RAM (12%).
 
 ## Android
