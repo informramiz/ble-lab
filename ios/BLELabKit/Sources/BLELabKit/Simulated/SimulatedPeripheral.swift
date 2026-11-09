@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// An in-process BLE Lab peripheral. It powers the simulator build (there is no Bluetooth in the
@@ -18,6 +19,14 @@ public actor SimulatedPeripheral {
     public private(set) var messages: [String] = []
     /// True simulates a CoreS3 (motion and touch); false an IMU-less DevKit, which must degrade gracefully.
     public nonisolated let hasBoardSensors: Bool
+    /// False simulates firmware older than 1.2.0, which has no OTA service.
+    public nonisolated let supportsOta: Bool
+    /// What the board runs now; an accepted update changes it to `otaResultRevision` after the reboot.
+    public private(set) var firmwareRevision = "ble-lab 1.1.0"
+    /// Images that were accepted and activated.
+    public private(set) var otaCompleted = 0
+    /// The most image bytes the central had in flight past the last status the board reported.
+    public private(set) var otaMaxBytesAhead = 0
 
     private var continuation: AsyncStream<LinkEvent>.Continuation?
     private var notifying: Set<UUID> = []
@@ -27,6 +36,11 @@ public actor SimulatedPeripheral {
     private var rng: SplitMix
     private let notifyInterval: Duration?
     private var tickers: [UUID: Task<Void, Never>] = [:]
+    private let otaVerifier: any OtaSignatureVerifier
+    private let otaSlotBytes: Int
+    private let otaResultRevision: String
+    private let rebootDelay: Duration
+    private var ota = OtaTransfer()
 
     /// `notifyInterval` streams telemetry on its own while notifications are on, like the firmware
     /// (200 ms). `nil` leaves it to `pushTelemetry()`, which keeps tests deterministic.
@@ -35,9 +49,19 @@ public actor SimulatedPeripheral {
         name: String = "BLE Lab (demo)",
         seed: UInt64 = 7,
         notifyInterval: Duration? = nil,
-        hasBoardSensors: Bool = true
+        hasBoardSensors: Bool = true,
+        supportsOta: Bool = true,
+        otaVerifier: any OtaSignatureVerifier = EcdsaOtaVerifier(),
+        otaSlotBytes: Int = 3 << 20,
+        otaResultRevision: String = "ble-lab 1.3.0",
+        rebootDelay: Duration = .seconds(1)
     ) {
         self.hasBoardSensors = hasBoardSensors
+        self.supportsOta = supportsOta
+        self.otaVerifier = otaVerifier
+        self.otaSlotBytes = otaSlotBytes
+        self.otaResultRevision = otaResultRevision
+        self.rebootDelay = rebootDelay
         self.id = id
         self.name = name
         self.rng = SplitMix(seed: seed)
@@ -103,6 +127,7 @@ public actor SimulatedPeripheral {
 
     /// Simulates the radio dropping the link (supervision timeout, out of range).
     public func dropLink(reason: String = "supervision timeout") {
+        if ota.state == .receiving { ota = OtaTransfer() }
         stopNotifying()
         continuation?.yield(.disconnected(.linkLost(reason: reason)))
         continuation?.finish()
@@ -128,7 +153,8 @@ public actor SimulatedPeripheral {
         switch characteristic {
         case .sig(GattProfile.manufacturerName): Data("Espressif".utf8)
         case .sig(GattProfile.modelNumber): Data((hasBoardSensors ? "M5Stack CoreS3" : "ESP32-WROOM-32").utf8)
-        case .sig(GattProfile.firmwareRevision): Data("ble-lab 1.1.0".utf8)
+        case .sig(GattProfile.firmwareRevision): Data(firmwareRevision.utf8)
+        case .custom(GattProfile.otaStatus) where supportsOta: encodedStatus()
         case .custom(GattProfile.led): TelemetryCodec.encodeLed(ledOn)
         default: throw .unexpected("read not permitted")
         }
@@ -143,9 +169,109 @@ public actor SimulatedPeripheral {
         case .custom(GattProfile.message) where (1...MessageCodec.maxBytes).contains(value.count):
             try pairIfRequired()
             messages.append(String(decoding: value, as: UTF8.self))
+        case .custom(GattProfile.otaControl) where supportsOta:
+            try pairIfRequired()
+            handleControl(value)
         default:
             throw .unexpected("write not permitted")
         }
+    }
+
+    func writeWithoutResponse(_ value: Data, to characteristic: AttributeID) throws(BLEError) {
+        guard supportsOta, characteristic == .custom(GattProfile.otaData) else { throw .unexpected("write not permitted") }
+        try pairIfRequired()
+        handleData(value)
+    }
+
+    // MARK: OTA (mirrors firmware/ble_lab ota_service)
+
+    /// The board's one transfer: image bytes seen so far and what START announced.
+    private struct OtaTransfer {
+        var state = OtaState.idle
+        var error = OtaError.none
+        var expected = 0
+        var versionCode = 0
+        var sha256 = Data()
+        var received = Data()
+        var reported = 0
+    }
+
+    private func encodedStatus() -> Data {
+        var out = Data([ota.state.rawValue, UInt8(ota.error.rawValue)])
+        out.append(littleEndian: UInt32(ota.reported))
+        return out
+    }
+
+    private func reportStatus() {
+        ota.reported = ota.received.count
+        guard notifying.contains(GattProfile.otaStatus) else { return }
+        continuation?.yield(.notification(.custom(GattProfile.otaStatus), encodedStatus()))
+    }
+
+    private func failOta(_ error: OtaError) {
+        ota.state = .error
+        ota.error = error
+        ota.received = Data()
+        reportStatus()
+    }
+
+    private func handleControl(_ value: Data) {
+        switch value.first {
+        case OtaProtocol.commandStart: start(value)
+        case OtaProtocol.commandAbort:
+            ota = OtaTransfer()
+            reportStatus()
+        case OtaProtocol.commandFinish: finish()
+        default: failOta(.badCommand)
+        }
+    }
+
+    private func start(_ value: Data) {
+        guard value.count == OtaProtocol.startLength else { return failOta(.badCommand) }
+        guard ota.state != .receiving else { return failOta(.badState) }
+        let bytes = [UInt8](value)
+        let size = (0..<4).reduce(0) { $0 | Int(bytes[1 + $1]) << (8 * $1) }
+        let versionCode = (0..<4).reduce(0) { $0 | Int(bytes[37 + $1]) << (8 * $1) }
+        let sha = Data(bytes[5..<37])
+        let signature = Data(bytes[41...])
+        guard size > 0, size <= otaSlotBytes else { return failOta(.tooLarge) }
+        guard otaVerifier.verify(size: size, versionCode: versionCode, sha256: sha, signature: signature) else {
+            return failOta(.badSignature)
+        }
+        guard versionCode >= (OtaSignature.versionCode(revision: firmwareRevision) ?? 0) else { return failOta(.downgrade) }
+        ota = OtaTransfer(state: .receiving, expected: size, versionCode: versionCode, sha256: sha)
+        otaMaxBytesAhead = 0
+        reportStatus()
+    }
+
+    private func handleData(_ value: Data) {
+        guard ota.state == .receiving else { return failOta(.badState) }
+        guard ota.received.count + value.count <= ota.expected else { return failOta(.overflow) }
+        ota.received.append(value)
+        otaMaxBytesAhead = max(otaMaxBytesAhead, ota.received.count - ota.reported)
+        if ota.received.count - ota.reported >= OtaProtocol.ackInterval || ota.received.count == ota.expected {
+            reportStatus()
+        }
+    }
+
+    private func finish() {
+        guard ota.state == .receiving else { return failOta(.badState) }
+        guard ota.received.count == ota.expected else { return failOta(.incomplete) }
+        guard Data(SHA256.hash(data: ota.received)) == ota.sha256 else { return failOta(.hash) }
+        guard ota.received.first == 0xE9 else { return failOta(.image) }
+        ota.state = .done
+        reportStatus()
+        otaCompleted += 1
+        Task { [rebootDelay] in
+            try? await Task.sleep(for: rebootDelay)
+            self.reboot()
+        }
+    }
+
+    private func reboot() {
+        firmwareRevision = otaResultRevision
+        ota = OtaTransfer()
+        dropLink(reason: "board restarted")
     }
 
     private func pairIfRequired() throws(BLEError) {
@@ -157,6 +283,12 @@ public actor SimulatedPeripheral {
 
     func setNotify(_ enabled: Bool, for characteristic: AttributeID) throws(BLEError) {
         guard case .custom(let uuid) = characteristic, Self.notifiable.contains(uuid) else { throw .serviceNotFound }
+        if uuid == GattProfile.otaStatus {
+            guard supportsOta else { throw .serviceNotFound }
+            try pairIfRequired()
+            if enabled { notifying.insert(uuid) } else { notifying.remove(uuid) }
+            return
+        }
         // An IMU-less board does not have the motion and touch characteristics at all.
         if !hasBoardSensors, uuid != GattProfile.telemetry { throw .serviceNotFound }
         guard enabled else { return stopNotifying(uuid) }
@@ -174,7 +306,7 @@ public actor SimulatedPeripheral {
         }
     }
 
-    private static let notifiable: Set<UUID> = [GattProfile.telemetry, GattProfile.motion, GattProfile.touch]
+    private static let notifiable: Set<UUID> = [GattProfile.telemetry, GattProfile.motion, GattProfile.touch, GattProfile.otaStatus]
 
     private func stopNotifying(_ uuid: UUID) {
         notifying.remove(uuid)
@@ -188,6 +320,7 @@ public actor SimulatedPeripheral {
     }
 
     func centralDisconnected() {
+        if ota.state == .receiving { ota = OtaTransfer() }
         stopNotifying()
         continuation?.finish()
         continuation = nil
