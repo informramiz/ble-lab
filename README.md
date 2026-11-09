@@ -55,7 +55,7 @@ flowchart LR
   subgraph App["Android / iOS app"]
     UI[Compose / SwiftUI screens] --> VM[ViewModel / @Observable model]
     VM --> CM[Connection manager<br/>state machine + backoff]
-    CM --> IF{{GattClient / GattLink<br/>interface}}
+    CM --> IF{{GattClient<br/>interface}}
     IF --> REAL[android.bluetooth /<br/>Core Bluetooth adapter]
     IF --> SIM[Simulated ESP32<br/>tests, screenshots, demo]
   end
@@ -126,7 +126,7 @@ What the Android side handles:
 - **Permissions**: `BLUETOOTH_SCAN` (`neverForLocation`) and `BLUETOOTH_CONNECT` on API 31+;
   `ACCESS_FINE_LOCATION` on API 30 and below, as the platform requires for scan results there.
 - **Scanning**: `ScanFilter` on the lab service UUID (toggle off to see every device), low-latency
-  mode, results aggregated and aged out, a 10 s scan window to save battery.
+  mode, results aggregated and aged out, a 12 s scan window to save battery.
 - **Connecting**: `connectGatt(…, autoConnect = false, TRANSPORT_LE)`; one GATT operation at a time
   behind a `Mutex`, each with a timeout because some stacks never call back; MTU request, service
   discovery, CCCD write for notifications, then the high connection priority.
@@ -188,8 +188,8 @@ built-in demo peripheral: [`docs/screenshots/ios`](docs/screenshots/ios).
 
 | Suite | What it proves |
 |---|---|
-| Android `:ble` (55 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
-| Android `:app` (67 tests, 27 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
+| Android `:ble` (61 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
+| Android `:app` (75 tests, 28 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
 | iOS `BLELabKit` (34 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing |
 
 CI (`.github/workflows/ci.yml`): Android format, lint, unit and screenshot verification, Kover line
@@ -223,7 +223,7 @@ coverage and checked by hand:
 ## Patterns followed
 
 - Ports and adapters: the connection state machine depends only on the
-  [`GattClient`](android/ble/src/main/kotlin/com/codebyramiz/blelab/ble/GattClient.kt) / `GattLink` interface;
+  [`GattClient`](android/ble/src/main/kotlin/com/codebyramiz/blelab/ble/Transport.kt) interface (with `GattClientFactory`, `BleScanner` and `BluetoothStateMonitor`, all in `Transport.kt`);
   the platform adapter and the simulated peripheral are interchangeable.
 - Unidirectional data flow with immutable UI state ([Android app architecture](https://developer.android.com/topic/architecture)).
 - Typed errors (`BleError` sealed type, Swift typed throws) instead of raw status codes.
