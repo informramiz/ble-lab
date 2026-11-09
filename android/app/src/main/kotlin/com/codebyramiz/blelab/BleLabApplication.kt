@@ -3,11 +3,11 @@ package com.codebyramiz.blelab
 import android.app.Application
 import com.codebyramiz.blelab.recording.RecordingRepository
 import dagger.hilt.android.HiltAndroidApp
-import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @HiltAndroidApp
 class BleLabApplication : Application() {

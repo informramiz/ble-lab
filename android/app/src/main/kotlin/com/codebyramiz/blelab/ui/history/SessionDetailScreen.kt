@@ -32,10 +32,10 @@ import com.codebyramiz.blelab.R
 import com.codebyramiz.blelab.ui.components.AxesChart
 import com.codebyramiz.blelab.ui.components.ChartScale
 import com.codebyramiz.blelab.ui.components.LiveChart
-import com.codebyramiz.blelab.ui.components.YAxisChart
-import com.codebyramiz.blelab.ui.components.formatAxis
 import com.codebyramiz.blelab.ui.components.SectionCard
 import com.codebyramiz.blelab.ui.components.SectionTitle
+import com.codebyramiz.blelab.ui.components.YAxisChart
+import com.codebyramiz.blelab.ui.components.formatAxis
 import com.codebyramiz.blelab.ui.theme.MonoStyle
 import kotlinx.coroutines.launch
 
