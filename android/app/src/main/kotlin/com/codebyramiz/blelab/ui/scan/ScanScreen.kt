@@ -29,6 +29,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -60,7 +61,7 @@ import com.codebyramiz.blelab.ui.components.RssiBars
 import com.codebyramiz.blelab.ui.theme.MonoStyle
 
 @Composable
-fun ScanRoute(onOpenDevice: (ScannedDevice) -> Unit, viewModel: ScanViewModel = hiltViewModel()) {
+fun ScanRoute(onOpenDevice: (ScannedDevice) -> Unit, onOpenHistory: () -> Unit, viewModel: ScanViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var granted by remember { mutableStateOf(BlePermissions.granted(context)) }
@@ -84,6 +85,7 @@ fun ScanRoute(onOpenDevice: (ScannedDevice) -> Unit, viewModel: ScanViewModel = 
             viewModel.stopScan()
             onOpenDevice(device)
         },
+        onOpenHistory = onOpenHistory,
     )
 }
 
@@ -99,6 +101,7 @@ fun ScanScreen(
     onRequestPermissions: () -> Unit,
     onEnableBluetooth: () -> Unit,
     onOpenDevice: (ScannedDevice) -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -110,6 +113,11 @@ fun ScanScreen(
                     Column {
                         Text(stringResource(R.string.scan_title))
                         Text(stringResource(R.string.scan_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenHistory, modifier = Modifier.testTag("historyButton")) {
+                        Icon(painterResource(R.drawable.ic_history), contentDescription = stringResource(R.string.history_open))
                     }
                 },
                 scrollBehavior = scrollBehavior,

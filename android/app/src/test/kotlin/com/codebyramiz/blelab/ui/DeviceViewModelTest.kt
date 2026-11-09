@@ -7,11 +7,17 @@ import androidx.lifecycle.viewModelScope
 import com.codebyramiz.blelab.MainDispatcherRule
 import com.codebyramiz.blelab.ble.GattClientFactory
 import com.codebyramiz.blelab.ble.model.ConnectionState
+import com.codebyramiz.blelab.ble.model.TouchKind
 import com.codebyramiz.blelab.ble.simulated.SimulatedPeripheral
+import com.codebyramiz.blelab.recording.FakeRecordingRepository
+import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.ui.device.DeviceViewModel
+import com.codebyramiz.blelab.ui.device.MessageStatus
+import com.codebyramiz.blelab.ui.device.Tilt
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -22,11 +28,15 @@ import org.junit.Test
 class DeviceViewModelTest {
     @get:Rule val main = MainDispatcherRule()
 
-    private val peripheral = SimulatedPeripheral()
+    private var peripheral = SimulatedPeripheral()
+    private val repository = FakeRecordingRepository()
+    private var now = 10_000L
 
     private fun viewModel() = DeviceViewModel(
         SavedStateHandle(mapOf("address" to peripheral.address, "name" to peripheral.name)),
         GattClientFactory { peripheral.newClient() },
+        repository,
+        { now },
     )
 
     /** Runs [body] against a fresh ViewModel and always cancels its scope, so a failed assertion cannot leave the simulated peripheral streaming and hang runTest. */
@@ -90,5 +100,95 @@ class DeviceViewModelTest {
         advanceTimeBy(2_000)
         runCurrent()
         assertThat(vm.state.value.connection).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
+    fun `motion samples fill the chart and drive the tilt`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        val state = vm.state.value
+        assertThat(state.hasImu).isTrue()
+        assertThat(state.motion).isNotEmpty()
+        assertThat(state.motion.size).isAtMost(DeviceViewModel.MOTION_SIZE)
+        assertThat(state.tilt).isNotEqualTo(Tilt.Level)
+    }
+
+    @Test
+    fun `a board without sensors degrades to no motion and no touch`() = vmTest(setUp = {
+        peripheral = SimulatedPeripheral(hasBoardSensors = false)
+    }) { vm ->
+        advanceTimeBy(5_000)
+        val state = vm.state.value
+        assertThat(state.connection).isInstanceOf(ConnectionState.Ready::class.java)
+        assertThat(state.latest).isNotNull()
+        assertThat(state.hasImu).isFalse()
+        assertThat(state.hasTouch).isFalse()
+        assertThat(state.motion).isEmpty()
+        assertThat(state.tilt).isEqualTo(Tilt.Level)
+    }
+
+    @Test
+    fun `touch events from the board are listed and logged`() = vmTest { vm ->
+        advanceTimeBy(2_000)
+        peripheral.touch(10, 20)
+        peripheral.touch(30, 40, TouchKind.LongPress)
+        advanceTimeBy(500)
+        val touches = vm.state.value.touches
+        assertThat(touches.map { it.x to it.y }).containsExactly(10 to 20, 30 to 40).inOrder()
+        assertThat(touches.last().kind).isEqualTo(TouchKind.LongPress)
+        assertThat(vm.state.value.log).contains("Touch LongPress at 30,40")
+    }
+
+    @Test
+    fun `message reaches the board and reports success`() = vmTest { vm ->
+        advanceTimeBy(2_000)
+        vm.sendMessage("  Hello  ")
+        assertThat(vm.state.value.message).isEqualTo(MessageStatus.Sending)
+        advanceTimeBy(1_000)
+        assertThat(peripheral.messages).containsExactly("Hello")
+        assertThat(vm.state.value.message).isEqualTo(MessageStatus.Sent("Hello"))
+    }
+
+    @Test
+    fun `failed message write shows the reason`() = vmTest(setUp = {
+        peripheral.requireBonding = true
+        peripheral.acceptBonding = false
+    }) { vm ->
+        advanceTimeBy(2_000)
+        vm.sendMessage("Hello")
+        advanceTimeBy(2_000)
+        assertThat(vm.state.value.message).isInstanceOf(MessageStatus.Failed::class.java)
+        assertThat(peripheral.messages).isEmpty()
+    }
+
+    @Test
+    fun `recording stores a session and closing it sets the end time`() = vmTest { vm ->
+        advanceTimeBy(2_000)
+        vm.toggleRecording()
+        runCurrent()
+        assertThat(vm.state.value.recording).isInstanceOf(RecordingState.Recording::class.java)
+        now = 15_000
+        advanceTimeBy(3_000)
+        vm.toggleRecording()
+        runCurrent()
+        assertThat(vm.state.value.recording).isEqualTo(RecordingState.Idle)
+        val session = repository.sessions().first().single()
+        assertThat(session.endedAtMillis).isEqualTo(15_000)
+        assertThat(session.deviceAddress).isEqualTo(peripheral.address)
+        assertThat(session.telemetryCount).isGreaterThan(0)
+        assertThat(session.motionCount).isGreaterThan(0)
+        assertThat(vm.state.value.log).contains("Recording saved")
+    }
+
+    @Test
+    fun `stopRecording closes an open session and is harmless when idle`() = vmTest { vm ->
+        advanceTimeBy(1_000)
+        vm.stopRecording()
+        runCurrent()
+        assertThat(repository.sessions().first()).isEmpty()
+        vm.toggleRecording()
+        runCurrent()
+        vm.stopRecording()
+        runCurrent()
+        assertThat(repository.sessions().first().single().endedAtMillis).isNotNull()
     }
 }
