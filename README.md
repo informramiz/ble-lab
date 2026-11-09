@@ -138,9 +138,19 @@ iOS-specific notes:
 
 ## Screenshots
 
+### Android
+
 Recorded by Roborazzi on the JVM (Robolectric, API 36) against the simulated peripheral:
-[`docs/screenshots/android`](docs/screenshots/android). iOS screenshots are not included: this Mac
-has no iOS simulator runtime installed.
+[`docs/screenshots/android`](docs/screenshots/android).
+
+### iOS
+
+Captured on a real iPhone 14 Pro running iOS 18.5 (Kobiton cloud device), connected to the
+built-in demo peripheral: [`docs/screenshots/ios`](docs/screenshots/ios).
+
+| Scan | Connected, live telemetry | LED on |
+|---|---|---|
+| <img src="docs/screenshots/ios/scan_light.png" width="240" alt="iOS scan list with the demo device"> | <img src="docs/screenshots/ios/device_ready_light.png" width="240" alt="iOS device screen streaming telemetry"> | <img src="docs/screenshots/ios/device_led_on_light.png" width="240" alt="iOS device screen with the LED switched on"> |
 
 ## Tests
 
