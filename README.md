@@ -8,6 +8,22 @@ One Bluetooth Low Energy profile, three codebases:
 | [`android/`](android) | Android central | Kotlin 2.4, Jetpack Compose (Material 3), Hilt, coroutines/Flow |
 | [`ios/`](ios) | iOS central | Swift 6 (strict concurrency), SwiftUI, Swift Charts, Core Bluetooth |
 
+## What it does
+
+Connect a phone to an ESP32 over Bluetooth Low Energy and use it as a small IoT console:
+
+- **Live telemetry**: a sensor value streams to a live chart five times a second.
+- **Motion dashboard**: boards with a motion sensor (M5Stack CoreS3) stream accelerometer and gyroscope
+  data; the Android app draws live charts and a tilt indicator. A plain ESP32 DevKit has no sensor, so
+  the app says so instead of showing empty charts.
+- **Two-way control**: switch the board LED, send a text message that appears on the board screen, and
+  see taps and long presses on the board touchscreen show up in the app.
+- **Recording and history**: record a telemetry and motion session on the phone (Room database), browse
+  past sessions, open a session chart, and export it as CSV through the share sheet.
+- **No board needed**: a built-in simulated ESP32 shows up as a "demo" device.
+
+The Android app has all of this. The iOS app still has the original scan, telemetry and LED features.
+
 Both apps scan, connect, negotiate MTU, discover services, stream notifications into a live chart,
 write a characteristic, pair when the peripheral asks, and reconnect with exponential backoff.
 The radio sits behind an interface on both platforms, with an in-memory simulated ESP32 behind
@@ -19,8 +35,11 @@ you can use with no board at all.
 | Item | UUID | Properties | Payload |
 |---|---|---|---|
 | Lab service | `B1E1AB00-5A1E-4C3A-9F5E-C0DE00B1E1AB` | primary, advertised | |
-| Telemetry | `B1E1AB01-…-C0DE00B1E1AB` | read, notify (every 200 ms) | 7 bytes little-endian: `u32 seq`, `i16 value × 100`, `u8 flags` (bit 0 = LED) |
+| Telemetry | `B1E1AB01-…-C0DE00B1E1AB` | read, notify (every 200 ms) | 7 bytes little-endian: `u32 seq`, `i16 value × 100`, `u8 flags` (bit 0 = LED on, bit 1 = board has a motion sensor, bit 2 = board has a touchscreen) |
 | LED | `B1E1AB02-…-C0DE00B1E1AB` | read, **encrypted** write | 1 byte: `0x00` off, `0x01` on |
+| Motion | `B1E1AB03-…-C0DE00B1E1AB` | notify (50 Hz, batched) | header 8 bytes little-endian: `u32 t_ms` (board clock at the first sample), `u16 first sample index` (wraps), `u8 count`, `u8 period_ms`; then `count × 12` bytes: `i16 ax, ay, az` in milli-g, `i16 gx, gy, gz` in 0.1 deg/s. Batch size follows the MTU (1 sample at MTU 23, up to 5) |
+| Touch | `B1E1AB04-…-C0DE00B1E1AB` | notify | 8 bytes little-endian: `u16 event index` (wraps), `u8 kind` (1 tap, 2 long press), `u8 flags` (bit 0 = injected from the serial console), `u16 x`, `u16 y` (pixels, 320×240) |
+| Message | `B1E1AB05-…-C0DE00B1E1AB` | **encrypted** write | UTF-8 text, 1 to 64 bytes, shown on the board screen |
 | Device Information | `0x180A` | read | Manufacturer `0x2A29`, Model `0x2A24`, Firmware `0x2A26` |
 
 Preferred ATT MTU 247. The LED write needs an encrypted link, so the first write triggers
@@ -95,6 +114,11 @@ cd android
 
 minSdk 26, targetSdk 37, compileSdk 37. AGP 9.5 with its built-in Kotlin support, version catalog in `gradle/libs.versions.toml`.
 
+Screens: scan, device (Live, Motion and Board tabs), history, and session detail. Recording is a
+`SessionRecorder` behind a `RecordingRepository` port (Room 3 adapter, in-memory fake for tests); an
+open recording is closed when you leave the device screen, and a session left open by a killed process
+shows as "Not closed" in history. CSV export goes through a `FileProvider` and `ACTION_SEND`.
+
 Modules: `:ble` (pure Kotlin domain: GATT profile, codec, connection state machine, backoff, simulated
 peripheral; plus the thin `android.bluetooth` adapters) and `:app` (Compose UI, ViewModels, permissions, Hilt wiring).
 
@@ -147,6 +171,10 @@ iOS-specific notes:
 Recorded by Roborazzi on the JVM (Robolectric, API 36) against the simulated peripheral:
 [`docs/screenshots/android`](docs/screenshots/android).
 
+| Motion | Board | History | Session |
+|---|---|---|---|
+| <img src="docs/screenshots/android/device_motion_light.png" width="200" alt="Motion tab with tilt and charts"> | <img src="docs/screenshots/android/device_board_light.png" width="200" alt="Board tab with touches and message"> | <img src="docs/screenshots/android/history_light.png" width="200" alt="Recorded sessions"> | <img src="docs/screenshots/android/session_detail_light.png" width="200" alt="Session chart and CSV export"> |
+
 ### iOS
 
 Captured on a real iPhone 14 Pro running iOS 18.5 (Kobiton cloud device), connected to the
@@ -160,12 +188,12 @@ built-in demo peripheral: [`docs/screenshots/ios`](docs/screenshots/ios).
 
 | Suite | What it proves |
 |---|---|
-| Android `:ble` (33 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop |
-| Android `:app` (18 tests, 9 of them screenshots) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up), Roborazzi screenshots of each screen state |
+| Android `:ble` (55 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
+| Android `:app` (67 tests, 27 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
 | iOS `BLELabKit` (34 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing |
 
 CI (`.github/workflows/ci.yml`): Android format, lint, unit and screenshot verification, Kover line
-coverage gate (80% minimum; currently 92.6% of lines, radio adapters excluded); firmware compile; iOS `swift test` and the simulator build.
+coverage gate (80% minimum; currently 92.7% of lines, radio adapters excluded); firmware compile; iOS `swift test` and the simulator build.
 
 ## On-device checklist
 
