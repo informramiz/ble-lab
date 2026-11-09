@@ -7,10 +7,15 @@ import com.codebyramiz.blelab.ble.model.BleError
 import com.codebyramiz.blelab.ble.model.BleException
 import com.codebyramiz.blelab.ble.model.ConnectionState
 import com.codebyramiz.blelab.ble.model.DeviceInfo
+import com.codebyramiz.blelab.ble.model.MotionSample
 import com.codebyramiz.blelab.ble.model.Telemetry
+import com.codebyramiz.blelab.ble.model.TouchEvent
 import com.codebyramiz.blelab.ble.protocol.GattProfile
 import com.codebyramiz.blelab.ble.protocol.GattStatus
+import com.codebyramiz.blelab.ble.protocol.MessageCodec
+import com.codebyramiz.blelab.ble.protocol.MotionCodec
 import com.codebyramiz.blelab.ble.protocol.TelemetryCodec
+import com.codebyramiz.blelab.ble.protocol.TouchCodec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +52,16 @@ class DeviceConnectionManager(
     private val _telemetry = MutableSharedFlow<Telemetry>(extraBufferCapacity = 64)
     val telemetry: SharedFlow<Telemetry> = _telemetry.asSharedFlow()
 
+    private val _motion = MutableSharedFlow<MotionSample>(extraBufferCapacity = 256)
+
+    /** IMU samples, unpacked from the board's batched notifications. Silent on boards without an IMU. */
+    val motion: SharedFlow<MotionSample> = _motion.asSharedFlow()
+
+    private val _touches = MutableSharedFlow<TouchEvent>(extraBufferCapacity = 32)
+
+    /** Touches on the board's screen. */
+    val touches: SharedFlow<TouchEvent> = _touches.asSharedFlow()
+
     private var connectionJob: Job? = null
 
     @Volatile
@@ -68,13 +83,19 @@ class DeviceConnectionManager(
     }
 
     /** Writes the LED characteristic; pairs first if the peripheral demands an encrypted link. */
-    suspend fun setLed(on: Boolean): Result<Unit> {
+    suspend fun setLed(on: Boolean): Result<Unit> = write(GattProfile.LED, TelemetryCodec.encodeLed(on))
+
+    /** Shows [text] on the board's screen. Blank text fails without touching the radio. */
+    suspend fun sendMessage(text: String): Result<Unit> {
+        val payload = MessageCodec.encode(text) ?: return Result.failure(IllegalArgumentException("Message is blank"))
+        return write(GattProfile.MESSAGE, payload)
+    }
+
+    private suspend fun write(characteristic: UUID, payload: ByteArray): Result<Unit> {
         val client = activeClient ?: return Result.failure(BleException(BleError.NotConnected))
         val ready = _state.value as? ConnectionState.Ready
         return try {
-            withBonding(client, ready?.address) {
-                client.write(GattProfile.LAB_SERVICE, GattProfile.LED, TelemetryCodec.encodeLed(on))
-            }
+            withBonding(client, ready?.address) { client.write(GattProfile.LAB_SERVICE, characteristic, payload) }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -122,10 +143,7 @@ class DeviceConnectionManager(
             client.events.collect { event ->
                 when (event) {
                     is GattEvent.Disconnected -> disconnected.complete(event.status)
-
-                    is GattEvent.Notification -> if (event.characteristic == GattProfile.TELEMETRY) {
-                        runCatching { TelemetryCodec.decode(event.value) }.onSuccess { _telemetry.tryEmit(it) }
-                    }
+                    is GattEvent.Notification -> dispatch(event)
                 }
             }
         }
@@ -151,6 +169,14 @@ class DeviceConnectionManager(
             DeviceInfo(null, null, null)
         }
         withBonding(client, address) { client.enableNotifications(GattProfile.LAB_SERVICE, GattProfile.TELEMETRY) }
+        // Firmware 1.0.0 has neither characteristic; a refusal there must not fail the connection.
+        for (optional in listOf(GattProfile.MOTION, GattProfile.TOUCH)) {
+            try {
+                client.enableNotifications(GattProfile.LAB_SERVICE, optional)
+            } catch (e: BleException) {
+                if (e.error !is BleError.Gatt) throw e
+            }
+        }
 
         activeClient = client
         _state.value = ConnectionState.Ready(address, info, mtu)
@@ -159,6 +185,14 @@ class DeviceConnectionManager(
         val status = disconnected.await()
         events.cancel()
         BleError.LinkLost(status)
+    }
+
+    private fun dispatch(event: GattEvent.Notification) {
+        when (event.characteristic) {
+            GattProfile.TELEMETRY -> runCatching { TelemetryCodec.decode(event.value) }.onSuccess { _telemetry.tryEmit(it) }
+            GattProfile.MOTION -> runCatching { MotionCodec.decode(event.value) }.onSuccess { batch -> batch.forEach { _motion.tryEmit(it) } }
+            GattProfile.TOUCH -> runCatching { TouchCodec.decode(event.value) }.getOrNull()?.let { _touches.tryEmit(it) }
+        }
     }
 
     private suspend fun readString(client: GattClient, characteristic: UUID): String? = try {

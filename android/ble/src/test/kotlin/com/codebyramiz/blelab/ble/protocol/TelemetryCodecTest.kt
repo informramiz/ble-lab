@@ -41,4 +41,18 @@ class TelemetryCodecTest {
         assertThat(TelemetryCodec.encodeLed(true)).isEqualTo(byteArrayOf(1))
         assertThat(TelemetryCodec.encodeLed(false)).isEqualTo(byteArrayOf(0))
     }
+
+    @Test
+    fun `decodes the sensor capability flags`() {
+        val bytes = TelemetryCodec.encode(Telemetry(1, 20f, ledOn = false, hasImu = true, hasTouch = true))
+        assertThat(bytes.last()).isEqualTo(0x06.toByte())
+        assertThat(TelemetryCodec.decode(bytes)).isEqualTo(Telemetry(1, 20f, ledOn = false, hasImu = true, hasTouch = true))
+    }
+
+    @Test
+    fun `firmware 1_0 flags decode as no sensors`() {
+        val decoded = TelemetryCodec.decode(TelemetryCodec.encode(Telemetry(1, 20f, ledOn = true)))
+        assertThat(decoded.hasImu).isFalse()
+        assertThat(decoded.hasTouch).isFalse()
+    }
 }

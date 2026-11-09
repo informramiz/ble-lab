@@ -51,7 +51,7 @@ class DeviceConnectionManagerTest {
         val ready = manager.state.value as ConnectionState.Ready
         assertThat(ready.mtu).isEqualTo(GattProfile.PREFERRED_MTU)
         assertThat(ready.info.manufacturer).isEqualTo("Espressif")
-        assertThat(ready.info.firmware).isEqualTo("ble-lab 1.0.0")
+        assertThat(ready.info.firmware).isEqualTo("ble-lab 1.1.0")
     }
 
     @Test
@@ -208,5 +208,65 @@ class DeviceConnectionManagerTest {
         override suspend fun createBond() = Unit
 
         override fun close() = Unit
+    }
+
+    @Test
+    fun `streams motion samples unpacked from batches`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        manager.motion.test {
+            val first = awaitItem()
+            val second = awaitItem()
+            assertThat(second.boardMillis - first.boardMillis).isEqualTo(20)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `forwards board touches`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+        manager.touches.test {
+            peripheral.touch(120, 80)
+            val event = awaitItem()
+            assertThat(event.x).isEqualTo(120)
+            assertThat(event.y).isEqualTo(80)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `sends a message to the board`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+
+        assertThat(manager.sendMessage("  hi board ").isSuccess).isTrue()
+        assertThat(peripheral.messages).containsExactly("hi board")
+    }
+
+    @Test
+    fun `a blank message never reaches the radio`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+
+        assertThat(manager.sendMessage("  ").isFailure).isTrue()
+        assertThat(peripheral.messages).isEmpty()
+    }
+
+    @Test
+    fun `a board without sensors still connects and just stays silent`() = runTest {
+        val devKit = SimulatedPeripheral(hasBoardSensors = false)
+        val manager = DeviceConnectionManager({ devKit.newClient() }, backgroundScope, noJitter)
+        manager.connect(devKit.address)
+        advanceTimeBy(5_000)
+
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
+        manager.telemetry.test {
+            assertThat(awaitItem().hasImu).isFalse()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }
