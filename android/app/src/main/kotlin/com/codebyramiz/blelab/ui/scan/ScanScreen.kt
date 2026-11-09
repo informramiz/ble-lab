@@ -245,8 +245,13 @@ private fun DeviceRow(device: ScannedDevice, onClick: () -> Unit, modifier: Modi
                 Text(device.address, style = MonoStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
-                RssiBars(device.rssi)
-                Text(stringResource(R.string.scan_rssi, device.rssi), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val rssi = device.rssi
+                if (rssi != null) {
+                    RssiBars(rssi)
+                    Text(stringResource(R.string.scan_rssi, rssi), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text(stringResource(R.string.scan_paired), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

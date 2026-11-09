@@ -12,6 +12,7 @@
     <string name="scan_demo_badge">Demo</string>
     <string name="scan_lab_badge">BLE Lab</string>
     <string name="scan_unnamed">Unnamed device</string>
+    <string name="scan_paired">Paired</string>
     <string name="scan_rssi">%1$d dBm</string>
     <string name="permission_title">Bluetooth permission needed</string>
     <string name="permission_body">BLE Lab needs Nearby devices access to scan for and connect to your ESP32. The demo device works without it.</string>
