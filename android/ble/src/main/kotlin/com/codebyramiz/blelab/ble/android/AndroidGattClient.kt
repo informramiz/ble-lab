@@ -166,26 +166,19 @@ class AndroidGattClient(private val context: Context, private val address: Strin
         BlePermissionCheck.requireConnect(context)
         val target = device
         if (target.bondState == BluetoothDevice.BOND_BONDED) return
-        val bonded = CompletableDeferred<Boolean>()
+        val changes = MutableSharedFlow<Int>(extraBufferCapacity = 8)
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val changed = IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
                 if (changed?.address != address) return
-                when (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)) {
-                    BluetoothDevice.BOND_BONDED -> bonded.complete(true)
-                    BluetoothDevice.BOND_NONE -> bonded.complete(false)
-                }
+                changes.tryEmit(intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR))
             }
         }
-        ContextCompat.registerReceiver(context, receiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        // EXPORTED: the broadcast is sent by the Bluetooth process, which a NOT_EXPORTED receiver never hears.
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED)
         try {
             if (!target.createBond()) throw BleException(BleError.BondingFailed)
-            val ok = try {
-                withTimeout(BOND_TIMEOUT_MILLIS) { bonded.await() }
-            } catch (e: TimeoutCancellationException) {
-                false
-            }
-            if (!ok) throw BleException(BleError.BondingFailed)
+            if (!awaitBonded(changes, { target.bondState }, BOND_TIMEOUT_MILLIS)) throw BleException(BleError.BondingFailed)
         } finally {
             context.unregisterReceiver(receiver)
         }
