@@ -15,6 +15,7 @@
 		7308E9B40FC1AA2269A6D3D2 /* BLELabKit in Frameworks */ = {isa = PBXBuildFile; productRef = AF2AE5F417CCA1B285846D3F /* BLELabKit */; };
 		929E5B01AAE13B0AB9930A2C /* AxisChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CF5050940D8AD4A52C0243 /* AxisChart.swift */; };
 		98BDA6777F3752B8369AD9D9 /* SwiftDataRecordingRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE087B4E602B19A456FD0FB /* SwiftDataRecordingRepository.swift */; };
+		BAD36237C0DF8EA7735EDC06 /* FirmwareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F5B9BB2571587953AFB3D77 /* FirmwareCard.swift */; };
 		C4156C11C73CDFCE4F23C234 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AF27D26CF4642CD88696E0 /* HistoryView.swift */; };
 		C540BB7DC30F81296A130780 /* DeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4A9A036460BFA981444782 /* DeviceView.swift */; };
 		F1073FC8C996462A7D33D0B6 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A35523AC29E0F919D28F9A5B /* ScanView.swift */; };
@@ -25,6 +26,7 @@
 		28E0E8F38749A92DCBDDC4A9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3449E5049A04464FEE0247EE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		37CF5050940D8AD4A52C0243 /* AxisChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AxisChart.swift; sourceTree = "<group>"; };
+		3F5B9BB2571587953AFB3D77 /* FirmwareCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareCard.swift; sourceTree = "<group>"; };
 		45A50E663D2F23B9841E474B /* BLELabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLELabApp.swift; sourceTree = "<group>"; };
 		4DEC3452DC99F94D8BAFE330 /* MotionTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionTab.swift; sourceTree = "<group>"; };
 		60BB6D9B64E6CF733299F366 /* BoardTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardTab.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 				45A50E663D2F23B9841E474B /* BLELabApp.swift */,
 				60BB6D9B64E6CF733299F366 /* BoardTab.swift */,
 				FE4A9A036460BFA981444782 /* DeviceView.swift */,
+				3F5B9BB2571587953AFB3D77 /* FirmwareCard.swift */,
 				B1AF27D26CF4642CD88696E0 /* HistoryView.swift */,
 				3449E5049A04464FEE0247EE /* Info.plist */,
 				4DEC3452DC99F94D8BAFE330 /* MotionTab.swift */,
@@ -187,6 +190,7 @@
 				27E970F574599FDBAF6D7B19 /* BLELabApp.swift in Sources */,
 				21363E10DB4ED96461A93566 /* BoardTab.swift in Sources */,
 				C540BB7DC30F81296A130780 /* DeviceView.swift in Sources */,
+				BAD36237C0DF8EA7735EDC06 /* FirmwareCard.swift in Sources */,
 				C4156C11C73CDFCE4F23C234 /* HistoryView.swift in Sources */,
 				5E5660EB1786D6ACC8FEAEDE /* MotionTab.swift in Sources */,
 				F1073FC8C996462A7D33D0B6 /* ScanView.swift in Sources */,

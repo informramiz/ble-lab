@@ -25,6 +25,7 @@ struct DeviceView: View {
                     RecordingCard(model: model)
                     TelemetryCard(model: model)
                     LedCard(model: model)
+                    FirmwareCard(model: model)
                     InfoCard(model: model)
                     LogCard(lines: model.log)
                 case .motion: MotionTab(model: model)
