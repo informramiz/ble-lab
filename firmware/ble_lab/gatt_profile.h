@@ -22,7 +22,7 @@
 // Write with response (1.1.0), encrypted link required. UTF-8 text, 1..64 bytes, shown on screen.
 #define MESSAGE_CHAR_UUID    "b1e1ab05-5a1e-4c3a-9f5e-c0de00b1e1ab"
 
-// Over-the-air update service (1.2.0). Every write needs an encrypted link. One image per session:
+// Over-the-air update service (1.2.0; signed images and MITM pairing since 1.3.0). Writes need an authenticated link. One image per session:
 //   1. central writes START to control, waits for a status notify with state RECEIVING, offset 0
 //   2. central streams the .bin as consecutive write-without-response chunks on data, never more
 //      than OTA_WINDOW_BYTES ahead of the last offset the board reported
@@ -31,8 +31,12 @@
 //   4. central writes FINISH; board checks size, SHA-256 and the image header, then notifies
 //      state DONE and reboots about a second later. ABORT (or a disconnect) discards the transfer.
 #define OTA_SERVICE_UUID     "b1e1ab10-5a1e-4c3a-9f5e-c0de00b1e1ab"
-// Write with response. Commands: 0x01 START + uint32 size (LE) + 32-byte SHA-256 of the whole image
-// (37 bytes), 0x02 ABORT (1 byte), 0x03 FINISH (1 byte).
+// Write with response, authenticated (MITM-protected) link required. Commands:
+//   0x01 START + uint32 size LE + 32-byte SHA-256 of the whole image + uint32 version code LE +
+//        64-byte ECDSA P-256 signature r||s (105 bytes). The board checks the signature over
+//        "BLFW1" | size | version | sha256 against its built-in public key, and the version against
+//        the running firmware, before it erases or writes anything. See firmware/tools/sign_firmware.py.
+//   0x02 ABORT (1 byte), 0x03 FINISH (1 byte).
 #define OTA_CONTROL_CHAR_UUID "b1e1ab11-5a1e-4c3a-9f5e-c0de00b1e1ab"
 // Write without response. Raw image bytes in order, 1..(MTU - 3) bytes per write.
 #define OTA_DATA_CHAR_UUID   "b1e1ab12-5a1e-4c3a-9f5e-c0de00b1e1ab"
@@ -56,11 +60,13 @@
 #define OTA_ERR_HASH         8   // SHA-256 mismatch
 #define OTA_ERR_IMAGE        9   // not a valid ESP32 app image, or activation failed
 #define OTA_ERR_ABORTED      10  // ABORT command or disconnect
+#define OTA_ERR_BAD_SIGNATURE 11 // unsigned image or signed by another key
+#define OTA_ERR_DOWNGRADE    12  // image version is older than the running firmware
 
 #define OTA_CMD_START        0x01
 #define OTA_CMD_ABORT        0x02
 #define OTA_CMD_FINISH       0x03
-#define OTA_START_LENGTH     37
+#define OTA_START_LENGTH     105
 #define OTA_STATUS_LENGTH    6
 #define OTA_ACK_INTERVAL     1024
 #define OTA_WINDOW_BYTES     4096
@@ -74,7 +80,9 @@
 #else
 #define MODEL_NUMBER         "ESP32-WROOM-32"
 #endif
-#define FIRMWARE_REVISION    "ble-lab 1.2.0"
+#define FIRMWARE_REVISION    "ble-lab 1.3.0"
+// major*10000 + minor*100 + patch; an OTA image with a lower code is refused (anti-rollback).
+#define FIRMWARE_VERSION_CODE 10300
 
 #define PREFERRED_MTU        247
 #define TELEMETRY_PERIOD_MS  200

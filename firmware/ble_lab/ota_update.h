@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "gatt_profile.h"
+#include "ota_verify.h"
 
 class OtaReceiver {
  public:
@@ -22,7 +23,7 @@ class OtaReceiver {
     return due;
   }
 
-  // payload: OTA_CMD_START already stripped, 4 bytes size LE + 32 bytes SHA-256.
+  // payload: OTA_CMD_START already stripped: size LE, SHA-256, version code LE, signature.
   bool start(const uint8_t *payload, size_t length) {
     if (state_ == OTA_STATE_DONE) return false;
     if (length != OTA_START_LENGTH - 1) return fail(OTA_ERR_BAD_COMMAND);
@@ -31,6 +32,10 @@ class OtaReceiver {
     const esp_partition_t *slot = esp_ota_get_next_update_partition(nullptr);
     if (slot == nullptr) return fail(OTA_ERR_BEGIN);
     if (size == 0 || size > slot->size) return fail(OTA_ERR_TOO_LARGE);
+    uint32_t version = payload[36] | (payload[37] << 8) | (payload[38] << 16) | ((uint32_t)payload[39] << 24);
+    // Authenticity first, before anything is erased: only an image signed by the built-in key gets in.
+    if (!ota_verify::manifestSigned(size, version, payload + 4, payload + 40)) return fail(OTA_ERR_BAD_SIGNATURE);
+    if (version < FIRMWARE_VERSION_CODE) return fail(OTA_ERR_DOWNGRADE);
     char hex[65];
     for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", payload[4 + i]);
     if (!Update.begin(size, U_FLASH) || !Update.setSHA256(hex)) {
@@ -55,7 +60,8 @@ class OtaReceiver {
     return true;
   }
 
-  // Verifies size, SHA-256 (inside Update.end, before the slot becomes bootable) and the image header.
+  // Verifies size, the SHA-256 the signature covers (inside Update.end, before the slot becomes
+  // bootable) and the image header.
   bool finish() {
     if (state_ != OTA_STATE_RECEIVING) return fail(OTA_ERR_BAD_STATE);
     if (offset_ != size_) return abortWith(OTA_ERR_INCOMPLETE);

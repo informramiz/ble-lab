@@ -190,6 +190,25 @@ static void drawTilt(bool hasImu, float ax, float ay) {
 }
 
 // Firmware update screen: percent 0..100, or -1 for "verifying and restarting".
+static void drawPasskey(uint32_t passkey) {
+  auto &d = canvas;
+  d.fillScreen(BG);
+  d.setTextDatum(top_left);
+  d.setTextColor(TFT_WHITE);
+  d.setFont(&fonts::FreeSansBold12pt7b);
+  d.drawString("Pairing", 12, 12);
+  d.setFont(&fonts::FreeSans9pt7b);
+  d.setTextColor(MUTED);
+  d.drawString("Type this passkey on the phone", 12, 50);
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%06u", (unsigned)passkey);
+  d.setFont(&fonts::FreeSansBold24pt7b);
+  d.setTextColor(ACCENT);
+  d.setTextDatum(top_center);
+  d.drawString(buf, 160, 110);
+  d.pushSprite(0, 0);
+}
+
 static void drawUpdate(int percent, bool failed) {
   auto &d = canvas;
   d.fillScreen(BG);
@@ -221,5 +240,6 @@ static void begin() {}
 static void draw(const Frame &) {}
 static void drawTilt(bool, float, float) {}
 static void drawUpdate(int, bool) {}
+static void drawPasskey(uint32_t) {}
 }  // namespace board_display
 #endif

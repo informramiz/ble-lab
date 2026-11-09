@@ -66,6 +66,9 @@ static volatile bool messagePending = false;
 static char message[MESSAGE_MAX_BYTES + 1] = "";
 
 static OtaReceiver ota;
+static constexpr uint32_t PASSKEY_SHOW_MS = 60000;
+static volatile uint32_t passkeyShown = 0;
+static volatile uint32_t passkeyUntilMs = 0;  // 0 = no passkey on screen
 static volatile uint32_t rebootAtMs = 0;  // 0 = none scheduled.
 static bool imageConfirmed = false;
 
@@ -246,6 +249,22 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
 };
 
+// Pairing: show the passkey the phone has to type. Called from the Bluedroid task, so it only stores
+// the key; loop() draws it.
+class PairingCallbacks : public BLESecurityCallbacks {
+  void onPassKeyNotify(uint32_t passkey) override {
+    Serial.printf("pairing passkey: %06u\n", (unsigned)passkey);
+    passkeyShown = passkey;
+    passkeyUntilMs = millis() + PASSKEY_SHOW_MS;
+    if (passkeyUntilMs == 0) passkeyUntilMs = 1;
+    screenDirty = true;
+  }
+  void onAuthenticationComplete(ble_gap_conn_desc *, int) override {
+    passkeyUntilMs = 0;
+    screenDirty = true;
+  }
+};
+
 class MessageCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
     String v = c->getValue();
@@ -319,14 +338,14 @@ static void addOtaService() {
   BLEService *svc = server->createService(OTA_SERVICE_UUID);
 
   BLECharacteristic *control = svc->createCharacteristic(OTA_CONTROL_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-  control->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  control->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
   control->setCallbacks(new OtaControlCallbacks());
   BLE2901 *controlName = new BLE2901();
-  controlName->setDescription("OTA control: 01 size32 sha256 | 02 | 03");
+  controlName->setDescription("OTA control: 01 size32 sha256 ver32 sig64 | 02 | 03");
   control->addDescriptor(controlName);
 
   BLECharacteristic *data = svc->createCharacteristic(OTA_DATA_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE_NR);
-  data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
   data->setCallbacks(new OtaDataCallbacks());
   BLE2901 *dataName = new BLE2901();
   dataName->setDescription("OTA data: image bytes in order");
@@ -398,10 +417,14 @@ void setup() {
   BLEDevice::init(DEVICE_NAME);
   BLEDevice::setMTU(PREFERRED_MTU);
 
-  // Just Works bonding with Secure Connections: no display or keyboard on the board.
+  // Passkey pairing with Secure Connections: the board is display-only, the phone types the 6-digit
+  // key the board shows (screen, or the serial console on boards without one). That makes the
+  // bond MITM-protected, which the OTA characteristics require; LED and message only need encryption.
   BLESecurity *security = new BLESecurity();
-  security->setAuthenticationMode(true, false, true);
-  security->setCapability(ESP_IO_CAP_NONE);
+  security->setAuthenticationMode(true, true, true);
+  security->setCapability(ESP_IO_CAP_OUT);
+  security->regenPassKeyOnConnect(true);
+  BLEDevice::setSecurityCallbacks(new PairingCallbacks());
 
   server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
@@ -465,6 +488,17 @@ void loop() {
     Serial.printf("message: %s\n", message);
   }
 
+  uint32_t until = passkeyUntilMs;
+  if (until != 0 && (int32_t)(now - until) < 0) {
+    // Pairing in progress: the passkey owns the screen so the user can read it.
+    if (BOARD_HAS_DISPLAY && (screenDirty || now - lastDrawMs >= 500)) {
+      screenDirty = false;
+      lastDrawMs = now;
+      board_display::drawPasskey(passkeyShown);
+    }
+    delay(1);
+    return;
+  }
   // Redraw on state changes, twice a second for the live reading, and fast while a ripple plays.
   // Never from BLE callbacks.
   int32_t rippleAge = rippleActive ? (int32_t)(now - rippleStartMs) : -1;
