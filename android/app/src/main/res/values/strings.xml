@@ -52,7 +52,9 @@
     <string name="info_unknown">—</string>
     <string name="log_title">Event log</string>
     <string name="retry">Try again</string>
-    <string name="reconnect_cause">%1$s</string>
+    <string name="banner_reconnecting">Disconnected: %1$s. Reconnecting.</string>
+    <string name="banner_failed">Could not stay connected: %1$s</string>
+    <string name="banner_pairing">Pairing… confirm on your phone</string>
     <string name="tab_live">Live</string>
     <string name="tab_motion">Motion</string>
     <string name="tab_control">Board</string>

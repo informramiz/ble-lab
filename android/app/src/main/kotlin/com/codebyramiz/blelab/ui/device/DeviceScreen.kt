@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,8 +45,10 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -101,7 +107,7 @@ fun DeviceRoute(onBack: () -> Unit, viewModel: DeviceViewModel = hiltViewModel()
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DeviceScreen(
     state: DeviceUiState,
@@ -115,6 +121,11 @@ fun DeviceScreen(
 ) {
     val connection = state.connection
     var tab by rememberSaveable { mutableStateOf(initialTab) }
+    val scroll = rememberScrollState()
+    // The message field is the last card of the Board tab: when the keyboard opens, scroll it and
+    // the Send button into the space the keyboard left.
+    val keyboardOpen = WindowInsets.isImeVisible
+    LaunchedEffect(keyboardOpen, tab) { if (keyboardOpen && tab == DeviceTab.Board) scroll.animateScrollTo(scroll.maxValue) }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -132,7 +143,8 @@ fun DeviceScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // Scaffold consumes the system bars; imePadding adds only what the keyboard takes beyond them.
+        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             PrimaryTabRow(selectedTabIndex = tab.ordinal) {
                 DeviceTab.entries.forEach { entry ->
                     Tab(
@@ -144,15 +156,13 @@ fun DeviceScreen(
                     )
                 }
             }
-            AnimatedVisibility(connection is ConnectionState.Reconnecting || connection is ConnectionState.Failed, enter = expandVertically(), exit = shrinkVertically()) {
-                ProblemCard(connection, onRetry, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
-            }
+            BannerHost(connection, onRetry, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
             AnimatedVisibility(connection is ConnectionState.Connecting || connection is ConnectionState.Discovering || connection is ConnectionState.Bonding) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 when (tab) {
                     DeviceTab.Live -> LiveTab(state, onToggleRecording)
@@ -399,23 +409,49 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
+private enum class BannerKind { Problem, Progress }
+
+private data class Banner(val text: String, val kind: BannerKind, val retryable: Boolean = false)
+
 @Composable
-private fun ProblemCard(connection: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    val (title, failed) = when (connection) {
-        is ConnectionState.Reconnecting -> connection.cause.message to false
-        is ConnectionState.Failed -> connection.error.message to true
-        else -> "" to false
+private fun bannerFor(connection: ConnectionState): Banner? = when (connection) {
+    is ConnectionState.Reconnecting -> Banner(stringResource(R.string.banner_reconnecting, connection.cause.message), BannerKind.Problem)
+    is ConnectionState.Failed -> Banner(stringResource(R.string.banner_failed, connection.error.message), BannerKind.Problem, retryable = true)
+    is ConnectionState.Bonding -> Banner(stringResource(R.string.banner_pairing), BannerKind.Progress)
+    else -> null
+}
+
+/**
+ * Connection problems and the pairing prompt. The last banner is kept while the card animates
+ * out, otherwise the exit animation recomposes it with no state to describe and shows a bare icon.
+ */
+@Composable
+private fun BannerHost(connection: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val current = bannerFor(connection)
+    var last by remember { mutableStateOf<Banner?>(null) }
+    LaunchedEffect(current) { if (current != null) last = current }
+    AnimatedVisibility(current != null, enter = expandVertically(), exit = shrinkVertically()) {
+        (current ?: last)?.let { BannerCard(it, onRetry, modifier) }
     }
+}
+
+@Composable
+private fun BannerCard(banner: Banner, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val problem = banner.kind == BannerKind.Problem
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
-        modifier = modifier.fillMaxWidth().testTag("problemCard"),
+        colors = if (problem) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+        } else {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+        },
+        modifier = modifier.fillMaxWidth().testTag(if (problem) "problemCard" else "pairingCard"),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
-            Icon(painterResource(R.drawable.ic_link_off), contentDescription = null)
+            Icon(painterResource(if (problem) R.drawable.ic_link_off else R.drawable.ic_lock), contentDescription = null)
             Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.reconnect_cause, title), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            if (failed) {
+            Text(banner.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).testTag("bannerText"))
+            if (banner.retryable) {
                 FilledTonalButton(onClick = onRetry, modifier = Modifier.testTag("retryButton")) {
                     Icon(painterResource(R.drawable.ic_refresh), contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))

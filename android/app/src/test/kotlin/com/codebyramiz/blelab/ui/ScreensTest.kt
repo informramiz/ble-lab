@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -163,8 +164,16 @@ class ScreensTest {
     fun reconnectingShowsCauseAndDisablesLed() {
         device(Fixtures.reconnecting, tab = DeviceTab.Board)
         compose.onNodeWithTag("problemCard").assertIsDisplayed()
+        compose.onNodeWithTag("bannerText").assertTextContains("Connection lost", substring = true)
         compose.onNodeWithTag("ledSwitch").performScrollTo().assertIsNotEnabled()
         shot("device_reconnecting")
+    }
+
+    @Test
+    fun bondingShowsPairingPrompt() {
+        device(Fixtures.bonding)
+        compose.onNodeWithTag("pairingCard").assertIsDisplayed()
+        compose.onNodeWithTag("bannerText").assertTextContains("confirm on your phone", substring = true)
     }
 
     @Test

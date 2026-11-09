@@ -84,6 +84,8 @@ object Fixtures {
         log = ready.log + "Connection lost: connection timeout; retry 2 in 1000 ms",
     )
 
+    val bonding = ready.copy(connection = ConnectionState.Bonding(ADDRESS))
+
     val failed = DeviceUiState(
         address = ADDRESS,
         name = "BLE Lab (demo)",
