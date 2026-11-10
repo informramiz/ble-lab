@@ -86,6 +86,28 @@ class SimulatedPeripheral(
         bonded = false
     }
 
+    /**
+     * The board loses its keys (flash erased, bond list full) while the phone still lists the
+     * bond: [GattClient.isBonded] stays true, but protected writes are rejected until re-paired.
+     */
+    fun peerForgetsBond() {
+        bonded = false
+        staleCentralBond = true
+    }
+
+    @Volatile private var staleCentralBond: Boolean = false
+
+    /** Protected writes rejected with insufficient authentication, as the board's stack does. */
+    @Volatile var insufficientAuthRejections: Int = 0
+        private set
+
+    private fun requireAuth() {
+        if (requireBonding && !bonded) {
+            insufficientAuthRejections++
+            throw BleException(BleError.Gatt(GattStatus.INSUFFICIENT_AUTHENTICATION))
+        }
+    }
+
     @Volatile var ledOn: Boolean = false
         private set
 
@@ -333,13 +355,13 @@ class SimulatedPeripheral(
 
         override suspend fun write(service: UUID, characteristic: UUID, value: ByteArray) = op {
             if (characteristic == GattProfile.OTA_CONTROL && supportsOta) {
-                if (requireBonding && !bonded) throw BleException(BleError.Gatt(GattStatus.INSUFFICIENT_AUTHENTICATION))
+                requireAuth()
                 return@op otaControl(value)
             }
             if (characteristic != GattProfile.LED && characteristic != GattProfile.MESSAGE) {
                 throw BleException(BleError.Gatt(GattStatus.GATT_FAILURE))
             }
-            if (requireBonding && !bonded) throw BleException(BleError.Gatt(GattStatus.INSUFFICIENT_AUTHENTICATION))
+            requireAuth()
             if (characteristic == GattProfile.MESSAGE) {
                 messages += value.decodeToString()
             } else {
@@ -361,12 +383,13 @@ class SimulatedPeripheral(
             notifying.value += characteristic
         }
 
-        override val isBonded: Boolean get() = bonded || !requireBonding
+        override val isBonded: Boolean get() = bonded || staleCentralBond || !requireBonding
 
         override suspend fun createBond() {
             delay(latencyMillis * 4)
             if (!acceptBonding) throw BleException(BleError.BondingFailed)
             bonded = true
+            staleCentralBond = false
             if (bondLandsAfterFailedWait) throw BleException(BleError.BondingFailed)
         }
 

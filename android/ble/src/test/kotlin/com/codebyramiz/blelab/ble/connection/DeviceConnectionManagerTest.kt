@@ -187,6 +187,35 @@ class DeviceConnectionManagerTest {
     }
 
     @Test
+    fun `an unbonded protected write pairs from the app first, so the board never rejects it`() = runTest {
+        peripheral.requireBonding = true
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+        peripheral.forgetBond()
+
+        assertThat(manager.setLed(true).isSuccess).isTrue()
+        assertThat(peripheral.bonded).isTrue()
+        assertThat(peripheral.insufficientAuthRejections).isEqualTo(0)
+        assertThat(peripheral.ledOn).isTrue()
+    }
+
+    @Test
+    fun `a write the board rejects for insufficient authentication pairs and retries`() = runTest {
+        peripheral.requireBonding = true
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+        peripheral.peerForgetsBond()
+
+        assertThat(manager.sendMessage("hi").isSuccess).isTrue()
+        assertThat(peripheral.insufficientAuthRejections).isEqualTo(1)
+        assertThat(peripheral.bonded).isTrue()
+        assertThat(peripheral.messages).containsExactly("hi")
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
     fun `a bond that lands after the pairing wait failed still ends in Ready`() = runTest {
         peripheral.requireBonding = true
         peripheral.bondLandsAfterFailedWait = true

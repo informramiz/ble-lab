@@ -81,9 +81,9 @@
 #else
 #define MODEL_NUMBER         "ESP32-WROOM-32"
 #endif
-#define FIRMWARE_REVISION    "ble-lab 1.3.4"
+#define FIRMWARE_REVISION    "ble-lab 1.3.5"
 // major*10000 + minor*100 + patch; an OTA image with a lower code is refused (anti-rollback).
-#define FIRMWARE_VERSION_CODE 10304
+#define FIRMWARE_VERSION_CODE 10305
 
 #define PREFERRED_MTU        247
 #define TELEMETRY_PERIOD_MS  200
