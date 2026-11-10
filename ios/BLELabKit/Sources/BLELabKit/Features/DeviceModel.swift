@@ -164,6 +164,8 @@ public final class DeviceModel {
     public func sendMessage(_ text: String) async {
         guard canSendMessage else { return }
         messageSending = true
+        // A new attempt starts clean; a stale "Not delivered" must not outlive the retry.
+        messageStatus = .idle
         defer { messageSending = false }
         do throws(BLEError) {
             try await manager.sendMessage(text)
