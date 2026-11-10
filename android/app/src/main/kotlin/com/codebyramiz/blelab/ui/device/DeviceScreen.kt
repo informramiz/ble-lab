@@ -127,7 +127,9 @@ fun DeviceScreen(
 ) {
     val connection = state.connection
     var tab by rememberSaveable { mutableStateOf(initialTab) }
-    val scroll = rememberScrollState()
+    // One scroll position per tab, so switching tabs doesn't open the next one mid-card.
+    val scrolls = DeviceTab.entries.associateWith { rememberScrollState() }
+    val scroll = scrolls.getValue(tab)
     // The message field is the last card of the Board tab: when the keyboard opens, scroll it and
     // the Send button into the space the keyboard left.
     val keyboardOpen = WindowInsets.isImeVisible
@@ -170,7 +172,7 @@ fun DeviceScreen(
             }
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.weight(1f).testTag("deviceContent").verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 when (tab) {
                     DeviceTab.Live -> LiveTab(state, onToggleRecording)
