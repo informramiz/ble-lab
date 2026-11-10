@@ -33,8 +33,12 @@ namespace board_display {
 static M5Canvas canvas(&M5.Display);
 static M5Canvas tilt(&M5.Display);
 
+// The layout is landscape. Every x/y below is derived from the live display size, so the
+// right-hand column and the footer follow the real edges instead of a hardcoded 320x240.
+static int W = 320, H = 240;
 static constexpr int TILT_SIZE = 84;
-static constexpr int TILT_X = 226, TILT_Y = 146;
+static int tiltX() { return W - TILT_SIZE - 10; }
+static int tiltY() { return H - TILT_SIZE - 16; }  // Clear of the footer line.
 
 static constexpr uint16_t BG = 0x0841;      // near-black blue
 static constexpr uint16_t CARD = 0x18E5;    // slate card
@@ -48,7 +52,16 @@ static void begin() {
   auto cfg = M5.config();
   cfg.serial_baudrate = 0;  // Serial is opened by the sketch.
   M5.begin(cfg);
-  M5.Display.setRotation(1);
+  // The CoreS3 panel (ILI9342C/E) is natively 320x240 and M5GFX sets it up with
+  // offset_rotation 0 and rotation 0, which is already landscape. setRotation(1) swaps
+  // width and height and turns it portrait (240x320), which clipped the old fixed layout.
+  // Keep M5's default and only flip by 90 degrees if a panel ever comes up portrait.
+  // M5.Touch maps raw points through the same rotation, so touch x/y stay in screen pixels.
+  if (M5.Display.width() < M5.Display.height()) {
+    M5.Display.setRotation((M5.Display.getRotation() + 1) & 3);
+  }
+  W = M5.Display.width();
+  H = M5.Display.height();
   M5.Display.fillScreen(BG);
   canvas.setPsram(true);
   canvas.setColorDepth(16);
@@ -60,6 +73,12 @@ static void begin() {
   tilt.createSprite(TILT_SIZE, TILT_SIZE);
 }
 
+// Serial `tap x y` / `hold x y` use the same screen pixels as a finger; keep them on screen.
+static void clampToScreen(int &x, int &y) {
+  x = x < 0 ? 0 : (x >= W ? W - 1 : x);
+  y = y < 0 ? 0 : (y >= H ? H - 1 : y);
+}
+
 static bool isAscii(const char *s) {
   for (; *s; ++s) {
     if ((uint8_t)*s >= 0x80) return false;
@@ -68,7 +87,7 @@ static bool isAscii(const char *s) {
 }
 
 static void drawMessageCard(M5Canvas &d, const char *message) {
-  const int x = 8, y = 132, w = 206, h = 82;
+  const int x = 8, y = 132, w = tiltX() - 20, h = H - 158;
   d.fillRoundRect(x, y, w, h, 12, CARD);
   d.setTextDatum(top_left);
   d.setFont(&fonts::FreeSans9pt7b);
@@ -107,10 +126,10 @@ static void draw(const Frame &f) {
   const char *stateText = f.connected ? "Connected" : "Advertising";
   d.setFont(&fonts::FreeSans9pt7b);
   const int pillW = d.textWidth(stateText) + 30;
-  d.fillRoundRect(320 - pillW - 10, 10, pillW, 26, 13, CARD);
-  d.fillCircle(320 - pillW + 4, 23, 5, stateColor);
+  d.fillRoundRect(W - pillW - 10, 10, pillW, 26, 13, CARD);
+  d.fillCircle(W - pillW + 4, 23, 5, stateColor);
   d.setTextColor(stateColor);
-  d.drawString(stateText, 320 - pillW + 16, 15);
+  d.drawString(stateText, W - pillW + 16, 15);
 
   // Temperature.
   d.setTextColor(MUTED);
@@ -126,7 +145,7 @@ static void draw(const Frame &f) {
   d.drawString("C", unitX, 76);
 
   // Lamp: glowing when on, outlined when off.
-  const int cx = 272, cy = 84, r = 22;
+  const int cx = W - 48, cy = 84, r = 22;
   if (f.ledOn) {
     d.fillCircle(cx, cy, r + 8, 0x4A40);
     d.fillCircle(cx, cy, r + 4, 0x9C80);
@@ -144,15 +163,16 @@ static void draw(const Frame &f) {
   // Tilt widget label (the bubble lives in its own sprite, pushed separately).
   d.setTextDatum(top_center);
   d.setTextColor(MUTED);
-  d.drawString(f.hasImu ? "Tilt" : "No IMU", TILT_X + TILT_SIZE / 2, 128);
+  d.drawString(f.hasImu ? "Tilt" : "No IMU", tiltX() + TILT_SIZE / 2, tiltY() - 18);
 
   // Footer.
   d.setTextDatum(top_left);
   d.setFont(&fonts::Font0);
   d.setTextColor(MUTED);
   snprintf(buf, sizeof(buf), "seq %lu", (unsigned long)f.sequence);
-  d.drawString(buf, 12, 226);
-  d.drawString("tap the screen to ping the phone", 100, 226);
+  d.drawString(buf, 12, H - 14);
+  d.setTextDatum(top_right);
+  d.drawString("tap the screen to ping the phone", W - 12, H - 14);
 
   // Touch ripple: expanding rings that fade out over 600 ms.
   if (f.rippleAgeMs >= 0 && f.rippleAgeMs < 600) {
@@ -186,7 +206,7 @@ static void drawTilt(bool hasImu, float ax, float ay) {
     t.fillCircle(px, py, 9, len < 0.05f ? GOOD : ACCENT);
     t.fillCircle(px - 3, py - 3, 3, TFT_WHITE);
   }
-  t.pushSprite(TILT_X, TILT_Y);
+  t.pushSprite(tiltX(), tiltY());
 }
 
 // Firmware update screen: percent 0..100, or -1 for "verifying and restarting".
@@ -205,7 +225,7 @@ static void drawPasskey(uint32_t passkey) {
   d.setFont(&fonts::FreeSansBold24pt7b);
   d.setTextColor(ACCENT);
   d.setTextDatum(top_center);
-  d.drawString(buf, 160, 110);
+  d.drawString(buf, W / 2, 110);
   d.pushSprite(0, 0);
 }
 
@@ -219,15 +239,16 @@ static void drawUpdate(int percent, bool failed) {
   d.setFont(&fonts::FreeSans9pt7b);
   d.setTextColor(MUTED);
   d.drawString(percent < 0 ? "Verifying, restarting..." : "Keep the phone close", 12, 50);
-  d.fillRoundRect(20, 110, 280, 22, 11, CARD);
-  const int fill = percent < 0 ? 280 : (280 * percent) / 100;
+  const int barW = W - 40;
+  d.fillRoundRect(20, 110, barW, 22, 11, CARD);
+  const int fill = percent < 0 ? barW : (barW * percent) / 100;
   if (fill > 0) d.fillRoundRect(20, 110, fill < 22 ? 22 : fill, 22, 11, failed ? WARN : ACCENT);
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", percent < 0 ? 100 : percent);
   d.setFont(&fonts::FreeSansBold24pt7b);
   d.setTextColor(TFT_WHITE);
   d.setTextDatum(top_center);
-  d.drawString(buf, 160, 150);
+  d.drawString(buf, W / 2, 150);
   d.pushSprite(0, 0);
 }
 
@@ -241,5 +262,6 @@ static void draw(const Frame &) {}
 static void drawTilt(bool, float, float) {}
 static void drawUpdate(int, bool) {}
 static void drawPasskey(uint32_t) {}
+static void clampToScreen(int &, int &) {}
 }  // namespace board_display
 #endif

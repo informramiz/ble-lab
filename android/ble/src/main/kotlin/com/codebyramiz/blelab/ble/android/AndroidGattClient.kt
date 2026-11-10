@@ -224,7 +224,13 @@ class AndroidGattClient(
         // EXPORTED: the broadcast is sent by the Bluetooth process, which a NOT_EXPORTED receiver never hears.
         ContextCompat.registerReceiver(context, receiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED)
         try {
-            if (!target.createBond()) throw BleException(BleError.BondingFailed)
+            // createBond() records this app as the bonding application, and Settings shows the
+            // pairing dialog straight away when that app is in the foreground. When pairing is
+            // already running (an older board sends a Security Request on connect), the call
+            // returns true without recording us, and Android keeps its notification; either way
+            // the right move is to wait for the result instead of failing.
+            val started = target.bondState == BluetoothDevice.BOND_BONDING || target.createBond()
+            if (!started && target.bondState != BluetoothDevice.BOND_BONDED) throw BleException(BleError.BondingFailed)
             if (!awaitBonded(changes, { target.bondState }, BOND_TIMEOUT_MILLIS)) throw BleException(BleError.BondingFailed)
         } finally {
             context.unregisterReceiver(receiver)
@@ -277,10 +283,14 @@ class AndroidGattClient(
         gatt.writeDescriptor(descriptor)
     }
 
-    private companion object {
+    internal companion object {
         const val CONNECT_TIMEOUT_MILLIS = 15_000L
         const val OPERATION_TIMEOUT_MILLIS = 10_000L
-        const val BOND_TIMEOUT_MILLIS = 30_000L
+
+        // Passkey entry: the user reads six digits off the board and types them. The stack
+        // reports a real failure or timeout itself (BOND_NONE), so this is only a backstop and
+        // must not cut a slow user off first.
+        const val BOND_TIMEOUT_MILLIS = 120_000L
         const val WRITE_BUSY_RETRY_MILLIS = 5L
 
         /** `BluetoothStatusCodes.SUCCESS` and `ERROR_GATT_WRITE_REQUEST_BUSY`, which are API 33 constants. */

@@ -187,6 +187,32 @@ class DeviceConnectionManagerTest {
     }
 
     @Test
+    fun `a bond that lands after the pairing wait failed still ends in Ready`() = runTest {
+        peripheral.requireBonding = true
+        peripheral.bondLandsAfterFailedWait = true
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+
+        assertThat(peripheral.bonded).isTrue()
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
+    fun `on-demand pairing that reports failure but bonds still retries the write`() = runTest {
+        peripheral.requireBonding = true
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+        peripheral.forgetBond()
+        peripheral.bondLandsAfterFailedWait = true
+
+        assertThat(manager.setLed(true).isSuccess).isTrue()
+        assertThat(peripheral.ledOn).isTrue()
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
     fun `LED write without a connection fails fast`() = runTest {
         val result = manager().setLed(true)
         assertThat((result.exceptionOrNull() as BleException).error).isEqualTo(BleError.NotConnected)

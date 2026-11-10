@@ -265,7 +265,7 @@ class DeviceViewModel @Inject constructor(
         ConnectionState.Idle -> "Idle"
         is ConnectionState.Connecting -> "Connecting, attempt ${state.attempt}"
         is ConnectionState.Discovering -> "Connected; negotiating MTU and discovering services"
-        is ConnectionState.Bonding -> "Pairing requested by peripheral"
+        is ConnectionState.Bonding -> "Pairing; confirm the passkey on your phone"
         is ConnectionState.Ready -> "Ready: MTU ${state.mtu}, notifications on"
         is ConnectionState.Reconnecting -> "${state.cause.message}; retry ${state.attempt} in ${state.delayMillis} ms"
         is ConnectionState.Failed -> "Failed: ${state.error.message}"

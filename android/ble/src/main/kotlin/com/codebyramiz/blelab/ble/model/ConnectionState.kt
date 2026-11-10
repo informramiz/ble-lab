@@ -9,7 +9,7 @@ sealed interface ConnectionState {
     /** Connected; negotiating MTU, discovering services, enabling notifications. */
     data class Discovering(val address: String) : ConnectionState
 
-    /** The peripheral asked for an encrypted link; system pairing is in progress. */
+    /** System pairing is in progress (started by the app, or on demand by a protected characteristic). */
     data class Bonding(val address: String) : ConnectionState
 
     /** [otaSupported]: the board exposes the OTA update service (firmware 1.2.0+). */
