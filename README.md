@@ -10,8 +10,11 @@ One Bluetooth Low Energy profile, three codebases:
 
 ## Demo
 
-<!-- Demo video goes here: phone screen recording next to the board. -->
-*Demo video coming soon.*
+A real CoreS3 board and a Pixel running the Android app: passkey pairing, LED, text to the board, live motion.
+
+![BLE Lab demo: pairing, LED, message and motion on a real board](docs/demo/ble-lab-demo.gif)
+
+Full 90-second walkthrough (scan, connect, touch, pairing, LED, message, motion, recording, history): [docs/demo/ble-lab-demo.mp4](docs/demo/ble-lab-demo.mp4)
 
 ## What it does
 
