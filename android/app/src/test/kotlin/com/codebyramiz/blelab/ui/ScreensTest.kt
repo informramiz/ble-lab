@@ -50,6 +50,13 @@ import org.robolectric.annotation.GraphicsMode
 class ScreensTest {
     @get:Rule val compose = createComposeRule()
 
+    private val originalZone = java.util.TimeZone.getDefault()
+
+    // Session times are rendered in the device zone; pin it so goldens match on every machine and CI.
+    @org.junit.Before fun pinTimeZone() = java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+
+    @org.junit.After fun restoreTimeZone() = java.util.TimeZone.setDefault(originalZone)
+
     private fun show(dark: Boolean = false, content: @Composable () -> Unit) {
         compose.mainClock.autoAdvance = false
         compose.setContent { BleLabTheme(darkTheme = dark, dynamicColor = false, content = content) }
