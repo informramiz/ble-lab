@@ -8,23 +8,25 @@ One Bluetooth Low Energy profile, three codebases:
 | [`android/`](android) | Android central | Kotlin 2.4, Jetpack Compose (Material 3), Hilt, coroutines/Flow |
 | [`ios/`](ios) | iOS central | Swift 6 (strict concurrency), SwiftUI, Swift Charts, Core Bluetooth |
 
+## Demo
+
+<!-- Demo video goes here: phone screen recording next to the board. -->
+*Demo video coming soon.*
+
 ## What it does
 
-Connect a phone to an ESP32 over Bluetooth Low Energy and use it as a small IoT console:
+Plug in an ESP32 board, open the app on your phone, and the phone becomes a remote control and dashboard for the board:
 
-- **Live telemetry**: a sensor value streams to a live chart five times a second.
-- **Motion dashboard**: boards with a motion sensor (M5Stack CoreS3) stream accelerometer and gyroscope
-  data; the Android app draws live charts and a tilt indicator. A plain ESP32 DevKit has no sensor, so
-  the app says so instead of showing empty charts.
-- **Two-way control**: switch the board LED, send a text message that appears on the board screen, and
-  see taps and long presses on the board touchscreen show up in the app.
-- **Recording and history**: record a telemetry and motion session on the phone (Room database), browse
-  past sessions, open a session chart, and export it as CSV through the share sheet.
-- **No board needed**: a built-in simulated ESP32 shows up as a "demo" device.
+- **Live data**: the board's temperature streams to a chart on the phone, five times a second.
+- **Motion**: on an M5Stack CoreS3, tilt or shake the board and the phone draws it live (accelerometer, gyroscope, a tilt dot). A plain ESP32 has no motion sensor, and the app says so.
+- **Control the board**: switch the board's lamp on and off, and type a message that shows up on the board's screen.
+- **Board to phone**: taps and long presses on the board's touchscreen show up in the app.
+- **Record and export**: record a session, browse past ones, see the chart, and share it as a CSV file.
+- **Secure pairing**: the board shows a 6-digit code on its screen and the phone asks for it, so nobody nearby can sneak in.
+- **Firmware update over Bluetooth**: send a new firmware file from the phone. The board checks its signature and refuses anything unsigned, signed with the wrong key, or older than what it runs.
+- **No board? Still works**: a built-in simulated board appears as a "demo" device.
 
-- **Signed over-the-air firmware update (Android)**: pick a signed `.signed.bin`; the app streams it over BLE, the board verifies an ECDSA P-256 signature and refuses unsigned, wrong-key and older images.
-
-The Android app has all of this. The iOS app has the same, including the signed firmware update (Kit and simulator tested, not yet run against a real board).
+Android has all of this. iOS has the same features, tested against the simulated board and on a real iPhone with the demo device, but not yet against a real board.
 
 Both apps scan, connect, negotiate MTU, discover services, stream notifications into a live chart,
 write a characteristic, pair when the peripheral asks, and reconnect with exponential backoff.
@@ -67,8 +69,6 @@ flowchart LR
 ```
 
 ## Flash the ESP32
-
-Nothing here has been flashed by the build; these are the steps to do it yourself.
 
 **Arduino IDE 2**
 1. Settings → Additional boards manager URLs: `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
@@ -127,10 +127,26 @@ demo-grade scheme: production should use ESP-IDF Secure Boot v2 (bootloader-veri
 The first OTA-capable build has to go over USB. The generic ESP32 build (`esp32:esp32:esp32`, 1,111,987 bytes) also
 fits the default two 1.25 MB slots, but the OTA path has only been designed against the CoreS3 scheme.
 
-Tested on hardware (CoreS3, firmware 1.0.0): a Pixel 4a (5G) on Android finds the board, connects (MTU 247),
-streams telemetry at 5 Hz, pairs on the first LED write, and switches the lamp on and off; the state is read back from
-the board's telemetry. A Mac running `bleak` passes the same checks.
-Compiled size: 1,101,367 bytes of flash (84% of the default partition), 41,340 bytes of RAM (12%).
+Compiled size at firmware 1.0.0: 1,101,367 bytes of flash (84% of the default partition), 41,340 bytes of RAM (12%).
+
+## Tested on hardware
+
+Board: M5Stack CoreS3. Phone: Pixel 4a (5G), Android. Latest run on firmware 1.3.3 (2026-11-10).
+
+Passed:
+- Scan finds `ble-lab-esp32`; connect negotiates MTU 247; Device Information reads back.
+- Live telemetry at 5 Hz and motion charts from the CoreS3 sensor.
+- Lamp switch and text message: both need an encrypted link, and the message shows on the board screen.
+- Passkey pairing: the board shows a random 6-digit code, the phone asks for it. The Android pairing prompt names the board (`ble-lab-esp32`).
+- Recording, history, session chart and CSV share.
+- Signed firmware update 1.3.0 → 1.3.1 over Bluetooth: verified, rebooted into the new image, the app reconnected.
+- Refusals: an older image (anti-rollback), an unsigned image and one signed with the wrong key are all rejected, and the link stays up.
+- A Mac running `bleak` passes the same scan, connect, telemetry and LED checks (firmware 1.0.0).
+
+Not yet tested on hardware:
+- The iOS app against a real board.
+- Touch events from the board screen (needs a person tapping the board).
+- Power cut in the middle of a firmware update (the bootloader should roll back).
 
 ## Android
 
