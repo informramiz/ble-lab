@@ -93,6 +93,12 @@ The onboard LED is assumed to be on GPIO 2 (ESP32 DevKit v1); boards that define
 **M5Stack CoreS3** (ESP32-S3, screen, battery): install the display library, then build with the CoreS3 board id.
 The screen shows the connection state, the live die temperature, and a lamp that the app's LED switch turns on and off.
 
+**Screenshot over USB (debug):** the serial console answers `snap` (reads the panel back) and `snapc` (composes the canvas and the tilt widget in RAM, no panel readback) with a base64 PNG between `-----PNG BEGIN-----` and `-----PNG END-----`. It blocks the main loop, so BLE waits about a second. Host side (`pip install pyserial`; DTR/RTS are held low so the board does not reset):
+
+```sh
+python3 firmware/tools/snap.py --port /dev/cu.usbmodem<N> --out screen.png --mode snap   # or snapc
+```
+
 ```sh
 arduino-cli lib install M5Unified@0.3.0
 arduino-cli compile --fqbn esp32:esp32:m5stack_cores3 firmware/ble_lab
