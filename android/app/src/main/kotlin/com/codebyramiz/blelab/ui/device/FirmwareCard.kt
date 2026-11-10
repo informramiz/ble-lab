@@ -26,6 +26,8 @@ import com.codebyramiz.blelab.ui.components.SectionTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 
 /** What the firmware card can ask of its host. */
 data class FirmwareActions(
@@ -36,11 +38,11 @@ data class FirmwareActions(
 )
 
 @Composable
-fun FirmwareCard(state: DeviceUiState, actions: FirmwareActions) {
+fun FirmwareCard(state: DeviceUiState, actions: FirmwareActions, modifier: Modifier = Modifier) {
     val update = state.firmware
     val busy = update is FirmwareUpdate.Running
     val picker = rememberFirmwarePicker(actions.onPicked)
-    SectionCard(Modifier.testTag("firmwareCard")) {
+    SectionCard(modifier.testTag("firmwareCard")) {
         SectionTitle(R.drawable.ic_memory, stringResource(R.string.fw_title))
         when {
             !state.canUpdateFirmware && !busy -> Note(R.string.fw_unsupported)
@@ -133,7 +135,19 @@ private fun rememberFirmwarePicker(onPicked: (ByteArray?) -> Unit): () -> Unit {
 private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 private suspend fun readCapped(context: Context, uri: Uri): ByteArray? = withContext(Dispatchers.IO) {
-    runCatching { context.contentResolver.openInputStream(uri)?.use { it.readNBytes(MAX_IMAGE_BYTES + 1) } }
+    runCatching { context.contentResolver.openInputStream(uri)?.use { it.readUpTo(MAX_IMAGE_BYTES + 1) } }
         .getOrNull()
         ?.takeIf { it.size <= MAX_IMAGE_BYTES }
+}
+
+/** Reads at most [limit] bytes (InputStream.readNBytes needs API 33). */
+private fun InputStream.readUpTo(limit: Int): ByteArray {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (out.size() < limit) {
+        val n = read(buffer, 0, minOf(buffer.size, limit - out.size()))
+        if (n < 0) break
+        out.write(buffer, 0, n)
+    }
+    return out.toByteArray()
 }

@@ -259,10 +259,15 @@ class PairingCallbacks : public BLESecurityCallbacks {
     if (passkeyUntilMs == 0) passkeyUntilMs = 1;
     screenDirty = true;
   }
-  void onAuthenticationComplete(ble_gap_conn_desc *, int) override {
+  void finish() {
     passkeyUntilMs = 0;
     screenDirty = true;
   }
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t) override { finish(); }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+  void onAuthenticationComplete(ble_gap_conn_desc *, int) override { finish(); }
+#endif
 };
 
 class MessageCallbacks : public BLECharacteristicCallbacks {
