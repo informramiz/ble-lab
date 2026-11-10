@@ -197,6 +197,19 @@ struct ForeverSleeper: Sleeper {
         #expect(await peripheral.messages == ["hello"])
     }
 
+    @Test func retryAfterPairingFailureClearsTheStaleError() async {
+        await peripheral.configure(requireBonding: true, acceptBonding: false)
+        let model = makeModel()
+        model.start()
+        #expect(await waitUntil { model.state.isReady })
+        await model.sendMessage("hi")
+        #expect(model.messageStatus == .failed(BLEError.pairingFailed.message))
+        await peripheral.configure(requireBonding: true, acceptBonding: true)
+        await model.sendMessage("hi")
+        #expect(model.messageStatus == .shown("hi"))
+        #expect(await peripheral.messages == ["hi"])
+    }
+
     @Test func recordingSavesSessionWithSamples() async {
         let model = makeModel()
         model.start()

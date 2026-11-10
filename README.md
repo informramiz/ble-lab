@@ -29,7 +29,7 @@ Plug in an ESP32 board, open the app on your phone, and the phone becomes a remo
 - **Firmware update over Bluetooth**: send a new firmware file from the phone. The board checks its signature and refuses anything unsigned, signed with the wrong key, or older than what it runs.
 - **No board? Still works**: a built-in simulated board appears as a "demo" device.
 
-Android has all of this. iOS has the same features, tested against the simulated board and on a real iPhone with the demo device, but not yet against a real board.
+Android has all of this. iOS has the same features. On a real iPhone 15 against the real CoreS3 board (firmware 1.3.7) I verified scan, connect, live temperature, board touch events, motion, session recording, history replay and the firmware screen. The passkey pairing that LED toggle, messages and OTA depend on is not verified on iOS yet: the board's passkey was entered through UI automation and the pairing never completed. Those features are tested against the simulated board only.
 
 Both apps scan, connect, negotiate MTU, discover services, stream notifications into a live chart,
 write a characteristic, pair when the peripheral asks, and reconnect with exponential backoff.
