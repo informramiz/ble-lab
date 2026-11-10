@@ -341,17 +341,25 @@ static void addDeviceInformationService() {
   dis->start();
 }
 
+// Write security has to be declared twice because the core uses a different BLE host per chip.
+// The plain ESP32 runs Bluedroid: there the security comes from setAccessPermissions(), and the
+// PROPERTY_*_ENC/AUTHEN constants are 0. The ESP32-S3 (CoreS3) runs NimBLE: there
+// setAccessPermissions() does nothing and the stack enforces only the BLE_GATT_CHR_F_WRITE_ENC /
+// WRITE_AUTHEN property flags. Without these, an unpaired phone could write the LED on a CoreS3.
+static constexpr uint32_t WRITE_NEEDS_ENCRYPTION = BLECharacteristic::PROPERTY_WRITE_ENC;
+static constexpr uint32_t WRITE_NEEDS_MITM = BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN;
+
 static void addOtaService() {
   BLEService *svc = server->createService(OTA_SERVICE_UUID);
 
-  BLECharacteristic *control = svc->createCharacteristic(OTA_CONTROL_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+  BLECharacteristic *control = svc->createCharacteristic(OTA_CONTROL_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE | WRITE_NEEDS_MITM);
   control->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
   control->setCallbacks(new OtaControlCallbacks());
   BLE2901 *controlName = new BLE2901();
   controlName->setDescription("OTA control: 01 size32 sha256 ver32 sig64 | 02 | 03");
   control->addDescriptor(controlName);
 
-  BLECharacteristic *data = svc->createCharacteristic(OTA_DATA_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE_NR);
+  BLECharacteristic *data = svc->createCharacteristic(OTA_DATA_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE_NR | WRITE_NEEDS_MITM);
   data->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
   data->setCallbacks(new OtaDataCallbacks());
   BLE2901 *dataName = new BLE2901();
@@ -381,7 +389,7 @@ static void addLabService() {
   telemetryChar->addDescriptor(telemetryName);
 
   ledChar = lab->createCharacteristic(
-      LED_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+      LED_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | WRITE_NEEDS_ENCRYPTION);
   // Writes need an encrypted link: the first write from an unbonded phone fails with
   // "insufficient authentication/encryption", which triggers pairing on Android and iOS.
   ledChar->setAccessPermissions(ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE_ENCRYPTED);
@@ -402,7 +410,7 @@ static void addLabService() {
   touchName->setDescription("Touch: u16 index, u8 kind, u8 flags, u16 x, u16 y");
   touchChar->addDescriptor(touchName);
 
-  messageChar = lab->createCharacteristic(MESSAGE_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+  messageChar = lab->createCharacteristic(MESSAGE_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE | WRITE_NEEDS_ENCRYPTION);
   messageChar->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
   messageChar->setCallbacks(new MessageCallbacks());
   BLE2901 *messageName = new BLE2901();

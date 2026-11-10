@@ -3,7 +3,7 @@
 Target: 60–90 s. Two sources, cut side by side: a camera on the board (phone held in frame is fine) and a screen recording on the phone (Android: Quick Settings → Screen record, no audio).
 
 Before you start
-- Board: CoreS3 on USB power, firmware 1.3.4. Phone: BLE Lab debug app, board **not** paired yet (Settings → Connected devices → forget `ble-lab-esp32` if listed).
+- Board: CoreS3 on USB power, firmware 1.3.5. Phone: BLE Lab debug app, board **not** paired yet (Settings → Connected devices → forget `ble-lab-esp32` if listed).
 - Phone: Do Not Disturb on, brightness up, screen record running.
 - Have a signed update file on the phone if you want the OTA shot (I'll put one in Downloads).
 

@@ -245,15 +245,29 @@ class DeviceConnectionManager(
         if (e.error is BleError.Gatt) null else throw e
     }
 
-    /** Runs [block]; on insufficient authentication/encryption, pairs once and retries. */
-    private suspend fun <T> withBonding(client: GattClient, address: String?, block: suspend () -> T): T = try {
-        block()
-    } catch (e: BleException) {
-        val status = (e.error as? BleError.Gatt)?.status ?: throw e
-        if (!GattStatus.needsBonding(status)) throw e
+    /**
+     * Runs a protected operation. With no bond it pairs first, from the app, so the write never
+     * reaches the board unencrypted: on a rejected write Android's own stack would otherwise
+     * start pairing behind the app's back (BluetoothGatt.onCharacteristicWrite auth retry), with
+     * a notification instead of a dialog and no time budget the app controls. If the board still
+     * answers insufficient authentication/encryption (it lost its keys while the phone kept the
+     * bond), pairs once and retries.
+     */
+    private suspend fun <T> withBonding(client: GattClient, address: String?, block: suspend () -> T): T {
+        if (!client.isBonded) pairShowingState(client, address)
+        return try {
+            block()
+        } catch (e: BleException) {
+            val status = (e.error as? BleError.Gatt)?.status ?: throw e
+            if (!GattStatus.needsBonding(status)) throw e
+            pairShowingState(client, address)
+            block()
+        }
+    }
+
+    private suspend fun pairShowingState(client: GattClient, address: String?) {
         if (address != null) _state.value = ConnectionState.Bonding(address)
         pair(client)
-        block()
     }
 
     /**
