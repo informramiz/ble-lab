@@ -41,6 +41,8 @@ public struct CompositeCentral: BLECentral {
         }
     }
 
+    public var radioAvailability: AsyncStream<Bool> { hardware.radioAvailability }
+
     public func connect(to id: UUID) async throws(BLEError) -> any GattLink {
         if id == demo.peripheral.id { return try await demo.connect(to: id) }
         return try await hardware.connect(to: id)

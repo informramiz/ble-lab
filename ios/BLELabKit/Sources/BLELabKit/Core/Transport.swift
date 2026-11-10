@@ -7,6 +7,13 @@ public protocol BLECentral: Sendable {
     func scan(serviceFilter: UUID?) -> AsyncThrowingStream<ScannedDevice, any Error>
     /// Connects and returns a link. Throws `BLEError`.
     func connect(to id: UUID) async throws(BLEError) -> any GattLink
+    /// Emits `true` each time the radio becomes usable (Bluetooth switched on, permission granted) and `false`
+    /// when it stops being usable. Transports without a radio state keep the default, an empty stream.
+    var radioAvailability: AsyncStream<Bool> { get }
+}
+
+extension BLECentral {
+    public var radioAvailability: AsyncStream<Bool> { AsyncStream { $0.finish() } }
 }
 
 public enum LinkEvent: Equatable, Sendable {

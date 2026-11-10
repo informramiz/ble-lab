@@ -21,6 +21,8 @@ public final class ConnectionManager {
     private let backoff: BackoffPolicy
     private let sleeper: any Sleeper
     private let random: @Sendable () -> Double
+    private let writeTimeout: Duration
+    private let timeoutSleeper: any Sleeper
     private let telemetryContinuation: AsyncStream<Telemetry>.Continuation
     private let motionContinuation: AsyncStream<MotionSample>.Continuation
     private let touchContinuation: AsyncStream<TouchEvent>.Continuation
@@ -33,8 +35,12 @@ public final class ConnectionManager {
         central: any BLECentral,
         backoff: BackoffPolicy = BackoffPolicy(),
         sleeper: any Sleeper = TaskSleeper(),
-        random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) }
+        random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
+        writeTimeout: Duration = .seconds(45),
+        timeoutSleeper: any Sleeper = TaskSleeper()
     ) {
+        self.writeTimeout = writeTimeout
+        self.timeoutSleeper = timeoutSleeper
         self.central = central
         self.backoff = backoff
         self.sleeper = sleeper
@@ -60,15 +66,45 @@ public final class ConnectionManager {
         state = .idle
     }
 
-    /// Writes the LED characteristic. On iOS the system pairs on demand when the peripheral
-    /// answers "insufficient encryption"; if the user declines, the write fails with `.pairingFailed`.
+    /// Writes the LED characteristic (with response) and returns only once the board has acknowledged it.
+    /// On iOS the system pairs on demand when the peripheral answers "insufficient encryption"; if the user
+    /// declines, the write fails with `.pairingFailed`. A write nobody answers (no pairing prompt ever shown)
+    /// fails with `.timeout` after `writeTimeout` instead of leaving the caller waiting forever.
     public func setLED(_ on: Bool) async throws(BLEError) {
         guard let link, case .ready = state else { throw .notConnected }
+        let value = TelemetryCodec.encodeLed(on)
         do throws(BLEError) {
-            try await link.write(TelemetryCodec.encodeLed(on), to: .custom(GattProfile.led), in: .custom(GattProfile.labService))
+            try await withTimeout { () async throws(BLEError) in
+                try await link.write(value, to: .custom(GattProfile.led), in: .custom(GattProfile.labService))
+            }
         } catch .insufficientEncryption {
             throw .pairingFailed
         }
+    }
+
+    /// Runs `operation`, giving up with `.timeout` after `writeTimeout`. The operation is not cancelled
+    /// (a Core Bluetooth write cannot be), its late result is dropped.
+    private func withTimeout(_ operation: @escaping @Sendable () async throws(BLEError) -> Void) async throws(BLEError) {
+        let race = TimeoutRace()
+        let sleeper = timeoutSleeper
+        let limit = writeTimeout
+        let result: Result<Void, BLEError> = await withCheckedContinuation { continuation in
+            race.install(continuation)
+            Task {
+                do throws(BLEError) {
+                    try await operation()
+                    race.finish(.success(()))
+                } catch {
+                    race.finish(.failure(error))
+                }
+            }
+            let timer = Task {
+                do { try await sleeper.sleep(for: limit) } catch { return }
+                race.finish(.failure(.timeout))
+            }
+            race.onFinish { timer.cancel() }
+        }
+        try result.get()
     }
 
     /// Shows `text` on the board's screen (encrypted write, like the LED). Blank text fails without
@@ -218,5 +254,34 @@ private struct SessionOtaLink: OtaLink {
         } catch .insufficientEncryption {
             throw .pairingFailed
         }
+    }
+}
+
+
+/// First result wins; later ones are ignored.
+private final class TimeoutRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Result<Void, BLEError>, Never>?
+    private var cleanup: (@Sendable () -> Void)?
+    private var done = false
+
+    func install(_ continuation: CheckedContinuation<Result<Void, BLEError>, Never>) { lock.withLock { self.continuation = continuation } }
+    func onFinish(_ cleanup: @escaping @Sendable () -> Void) {
+        let runNow = lock.withLock { () -> Bool in
+            if done { return true }
+            self.cleanup = cleanup
+            return false
+        }
+        if runNow { cleanup() }
+    }
+
+    func finish(_ result: Result<Void, BLEError>) {
+        let (continuation, cleanup) = lock.withLock { () -> (CheckedContinuation<Result<Void, BLEError>, Never>?, (@Sendable () -> Void)?) in
+            guard !done else { return (nil, nil) }
+            done = true
+            return (self.continuation, self.cleanup)
+        }
+        continuation?.resume(returning: result)
+        cleanup?()
     }
 }

@@ -7,6 +7,9 @@ final class ScriptedCentral: BLECentral, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: AsyncThrowingStream<ScannedDevice, any Error>.Continuation?
     private(set) var filters: [UUID?] = []
+    private let radio = AsyncStream<Bool>.makeStream()
+    var radioAvailability: AsyncStream<Bool> { radio.stream }
+    func setRadio(_ available: Bool) { radio.continuation.yield(available) }
 
     func scan(serviceFilter: UUID?) -> AsyncThrowingStream<ScannedDevice, any Error> {
         let (stream, continuation) = AsyncThrowingStream<ScannedDevice, any Error>.makeStream()
@@ -50,6 +53,42 @@ struct ForeverSleeper: Sleeper {
         model.start()
         #expect(model.isScanning)
         #expect(await waitUntil { !model.isScanning })
+    }
+
+    @Test func scanResumesWhenBluetoothComesBack() async {
+        let model = ScanModel(central: central, sleeper: ForeverSleeper())
+        model.start()
+        #expect(await waitUntil { central.filters.count == 1 })
+        central.fail(.bluetoothUnavailable(reason: "Bluetooth is off"))
+        #expect(await waitUntil { !model.isScanning && model.error != nil })
+        central.setRadio(true)
+        #expect(await waitUntil { central.filters.count == 2 })
+        #expect(model.isScanning)
+        #expect(model.error == nil)
+    }
+
+    @Test func scanResumesAfterPermissionIsGranted() async {
+        let model = ScanModel(central: central, sleeper: ForeverSleeper())
+        model.start()
+        #expect(await waitUntil { central.filters.count == 1 })
+        central.fail(.unauthorized)
+        #expect(await waitUntil { model.error == .unauthorized })
+        central.setRadio(true)
+        #expect(await waitUntil { central.filters.count == 2 })
+        #expect(model.isScanning)
+    }
+
+    @Test func scanDoesNotResumeAfterTheUserStoppedIt() async {
+        let model = ScanModel(central: central, sleeper: ForeverSleeper())
+        model.start()
+        #expect(await waitUntil { central.filters.count == 1 })
+        central.fail(.bluetoothUnavailable(reason: "Bluetooth is off"))
+        #expect(await waitUntil { model.error != nil })
+        model.stop()
+        central.setRadio(true)
+        for _ in 0..<200 { await Task.yield() }
+        #expect(central.filters.count == 1)
+        #expect(!model.isScanning)
     }
 
     @Test func filterDefaultsToLabServiceAndTogglingRestarts() async {
@@ -203,7 +242,7 @@ struct ForeverSleeper: Sleeper {
         model.start()
         #expect(await waitUntil { model.state.isReady })
         await model.sendMessage("hi")
-        #expect(model.messageStatus == .failed(BLEError.pairingFailed.message))
+        #expect(model.messageStatus == .failed(BLEError.pairingFailed.userMessage))
         await peripheral.configure(requireBonding: true, acceptBonding: true)
         await model.sendMessage("hi")
         #expect(model.messageStatus == .shown("hi"))

@@ -12,7 +12,7 @@ struct ScanView: View {
             List {
                 if let error = model.error {
                     Section {
-                        Label(error.message, systemImage: "exclamationmark.triangle.fill")
+                        Label(error.userMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .accessibilityIdentifier("scanError")
                     }

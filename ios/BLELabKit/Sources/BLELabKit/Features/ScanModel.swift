@@ -18,6 +18,9 @@ public final class ScanModel {
     private let sleeper: any Sleeper
     private var task: Task<Void, Never>?
     private var timer: Task<Void, Never>?
+    private var availabilityTask: Task<Void, Never>?
+    /// True when the last scan ended because Bluetooth was off or not allowed; the next "radio is usable" restarts it.
+    private var resumeWhenRadioReturns = false
 
     public init(central: any BLECentral, duration: Duration = .seconds(10), sleeper: any Sleeper = TaskSleeper()) {
         self.central = central
@@ -26,6 +29,7 @@ public final class ScanModel {
     }
 
     public func start() {
+        observeRadio()
         task?.cancel()
         devices = []
         error = nil
@@ -35,8 +39,13 @@ public final class ScanModel {
             do {
                 for try await device in stream { self?.upsert(device) }
             } catch {
-                self?.error = (error as? BLEError) ?? .unexpected(error.localizedDescription)
+                let mapped = (error as? BLEError) ?? .unexpected(error.localizedDescription)
+                self?.error = mapped
                 self?.isScanning = false
+                switch mapped {
+                case .bluetoothUnavailable, .unauthorized: self?.resumeWhenRadioReturns = true
+                default: break
+                }
             }
         }
         timer?.cancel()
@@ -47,11 +56,24 @@ public final class ScanModel {
     }
 
     public func stop() {
+        resumeWhenRadioReturns = false
         task?.cancel()
         task = nil
         timer?.cancel()
         timer = nil
         isScanning = false
+    }
+
+    /// Bluetooth switched back on or the permission prompt answered with Allow: scan again without a relaunch.
+    private func observeRadio() {
+        guard availabilityTask == nil else { return }
+        let updates = central.radioAvailability
+        availabilityTask = Task { [weak self] in
+            for await available in updates where available {
+                guard let self, self.resumeWhenRadioReturns else { continue }
+                self.start()
+            }
+        }
     }
 
     private func upsert(_ device: ScannedDevice) {
