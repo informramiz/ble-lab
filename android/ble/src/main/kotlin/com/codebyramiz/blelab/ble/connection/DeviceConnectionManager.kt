@@ -186,11 +186,7 @@ class DeviceConnectionManager(
             // "tap to pair" notification and the pairing times out. Reconnecting is paused
             // because this runs inside the session, and a refusal ends it (BondingFailed is final).
             _state.value = ConnectionState.Bonding(address)
-            try {
-                client.createBond()
-            } catch (e: BleException) {
-                throw BleException(BleError.BondingFailed)
-            }
+            pair(client)
         }
         _state.value = ConnectionState.Discovering(address)
         val mtu = try {
@@ -256,11 +252,22 @@ class DeviceConnectionManager(
         val status = (e.error as? BleError.Gatt)?.status ?: throw e
         if (!GattStatus.needsBonding(status)) throw e
         if (address != null) _state.value = ConnectionState.Bonding(address)
+        pair(client)
+        block()
+    }
+
+    /**
+     * Runs system pairing. A failed or timed-out wait is not the last word: the bond can still
+     * complete (the user types the passkey late, or the link blips while the dialog is open),
+     * so the stored bond state decides. Only a device that is really not bonded fails, and that
+     * failure is final ([BleError.BondingFailed] is not retryable). A dropped link that leaves
+     * a bond behind is caught by the next GATT operation and handled by the normal reconnect.
+     */
+    private suspend fun pair(client: GattClient) {
         try {
             client.createBond()
-        } catch (bondFailure: BleException) {
-            throw BleException(BleError.BondingFailed)
+        } catch (e: BleException) {
+            if (!client.isBonded) throw BleException(BleError.BondingFailed)
         }
-        block()
     }
 }

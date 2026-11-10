@@ -72,6 +72,12 @@ class SimulatedPeripheral(
     /** When false, [GattClient.createBond] fails as if the user tapped Cancel. */
     @Volatile var acceptBonding: Boolean = true
 
+    /**
+     * When true, [GattClient.createBond] reports a failure but the bond is stored anyway: the
+     * user typed the passkey after the app stopped waiting, or the link blipped mid-pairing.
+     */
+    @Volatile var bondLandsAfterFailedWait: Boolean = false
+
     @Volatile var bonded: Boolean = false
         private set
 
@@ -361,6 +367,7 @@ class SimulatedPeripheral(
             delay(latencyMillis * 4)
             if (!acceptBonding) throw BleException(BleError.BondingFailed)
             bonded = true
+            if (bondLandsAfterFailedWait) throw BleException(BleError.BondingFailed)
         }
 
         override fun close() {

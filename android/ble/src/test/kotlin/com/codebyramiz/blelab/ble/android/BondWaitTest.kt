@@ -52,4 +52,23 @@ class BondWaitTest {
         assertThat(refused.await()).isFalse()
         assertThat(awaitBonded(emptyFlow(), { BluetoothDevice.BOND_BONDING }, 30_000)).isFalse()
     }
+
+    @Test
+    fun `a slow passkey entry well past 30 seconds still completes`() = runTest {
+        val changes = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+        val result = async { awaitBonded(changes, { BluetoothDevice.BOND_BONDING }, AndroidGattClient.BOND_TIMEOUT_MILLIS) }
+        runCurrent()
+        advanceTimeBy(75_000)
+        changes.emit(BluetoothDevice.BOND_BONDED)
+        assertThat(result.await()).isTrue()
+    }
+
+    @Test
+    fun `a bond that completes right at the timeout is read once more`() = runTest {
+        var state = BluetoothDevice.BOND_BONDING
+        val result = async { awaitBonded(emptyFlow(), { state }, 1_000, pollMillis = 10_000) }
+        advanceTimeBy(999)
+        state = BluetoothDevice.BOND_BONDED
+        assertThat(result.await()).isTrue()
+    }
 }

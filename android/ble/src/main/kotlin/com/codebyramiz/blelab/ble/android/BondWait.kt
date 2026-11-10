@@ -13,7 +13,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Waits for a bond to finish. [changes] carries `ACTION_BOND_STATE_CHANGED` states; because that
  * broadcast can be missed, [current] (the device's own `bondState`) is polled as well, and only a
  * poll that reads BONDED counts: a poll reading NONE can just mean bonding has not started yet.
- * Returns true when bonded, false on a BOND_NONE broadcast or after [timeoutMillis].
+ * Returns true when bonded, false on a BOND_NONE broadcast or after [timeoutMillis] unless a final
+ * read of [current] shows the bond completed at the last moment.
  */
 internal suspend fun awaitBonded(
     changes: Flow<Int>,
@@ -30,5 +31,5 @@ internal suspend fun awaitBonded(
     val result = withTimeoutOrNull(timeoutMillis) {
         merge(changes, polled).first { it == BluetoothDevice.BOND_BONDED || it == BluetoothDevice.BOND_NONE }
     }
-    return result == BluetoothDevice.BOND_BONDED
+    return result == BluetoothDevice.BOND_BONDED || (result == null && current() == BluetoothDevice.BOND_BONDED)
 }

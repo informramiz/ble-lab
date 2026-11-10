@@ -2,7 +2,7 @@
 // API reference: https://github.com/espressif/arduino-esp32/tree/master/libraries/BLE
 //
 // Services:
-//   BLE Lab (custom)   telemetry notify every 200 ms, LED write (encrypted, Just Works bonding),
+//   BLE Lab (custom)   telemetry notify every 200 ms, LED write (encrypted, passkey bonding),
 //                      motion notify (IMU batches, 50 Hz), touch notify, message write (encrypted)
 //   OTA update         firmware image over BLE (control, data, status), encrypted writes,
 //                      SHA-256 checked, rollback to the previous image if the new one never confirms
@@ -204,8 +204,10 @@ static void pollConsole() {
     len = 0;
     int x = 0, y = 0;
     if (sscanf(line, "tap %d %d", &x, &y) == 2) {
+      board_display::clampToScreen(x, y);
       sendTouch(TOUCH_KIND_TAP, x, y, true);
     } else if (sscanf(line, "hold %d %d", &x, &y) == 2) {
+      board_display::clampToScreen(x, y);
       sendTouch(TOUCH_KIND_HOLD, x, y, true);
     } else if (strcmp(line, "imu") == 0) {
       board_sensors::ImuSample s;
@@ -432,6 +434,12 @@ void setup() {
   // and regenPassKeyOnConnect() has no effect (BLESecurity only regenerates once a key is set).
   security->setPassKey(false);
   security->regenPassKeyOnConnect(true);
+  // Let the phone start pairing. With forced security (the core's default) the board sends an SMP
+  // Security Request on connect, Android sees a remote-initiated pairing with no bonding app on
+  // record, and AOSP Settings posts a "pairing request" notification instead of a dialog. When the
+  // app calls createBond() itself it is recorded as the bonding app and the dialog opens in front.
+  // Phones that don't pair first still get Insufficient Authentication on the protected characteristics.
+  security->setForceAuthentication(false);
   BLEDevice::setSecurityCallbacks(new PairingCallbacks());
 
   server = BLEDevice::createServer();
