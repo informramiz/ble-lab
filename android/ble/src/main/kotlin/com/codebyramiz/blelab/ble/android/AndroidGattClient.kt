@@ -23,6 +23,7 @@ import com.codebyramiz.blelab.ble.model.BleError
 import com.codebyramiz.blelab.ble.model.BleException
 import com.codebyramiz.blelab.ble.protocol.GattProfile
 import com.codebyramiz.blelab.ble.protocol.GattStatus
+import com.codebyramiz.blelab.ble.scan.ScanDeviceCache
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -34,8 +35,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
-class AndroidGattClientFactory(private val context: Context) : GattClientFactory {
-    override fun create(address: String): GattClient = AndroidGattClient(context.applicationContext, address)
+class AndroidGattClientFactory(
+    private val context: Context,
+    private val scanned: ScanDeviceCache<BluetoothDevice> = ScanDeviceCache(),
+) : GattClientFactory {
+    override fun create(address: String): GattClient = AndroidGattClient(context.applicationContext, address, scanned)
 }
 
 /**
@@ -51,7 +55,11 @@ class AndroidGattClientFactory(private val context: Context) : GattClientFactory
  * follow that, hence the MissingPermission suppressions.
  */
 @SuppressLint("MissingPermission")
-class AndroidGattClient(private val context: Context, private val address: String) : GattClient {
+class AndroidGattClient(
+    private val context: Context,
+    private val address: String,
+    private val scanned: ScanDeviceCache<BluetoothDevice> = ScanDeviceCache(),
+) : GattClient {
     private val operationLock = Mutex()
     private val _events = MutableSharedFlow<GattEvent>(extraBufferCapacity = 64)
     override val events: Flow<GattEvent> = _events.asSharedFlow()
@@ -119,8 +127,12 @@ class AndroidGattClient(private val context: Context, private val address: Strin
         if (status == GattStatus.SUCCESS) op.complete(value()) else op.completeExceptionally(BleException(BleError.Gatt(status)))
     }
 
+    /**
+     * The object from the latest scan hit carries the advertised name, so Android can title the
+     * pairing prompt; known or bonded reconnects were not scanned and fall back to the address.
+     */
     private val device: BluetoothDevice
-        get() = context.getSystemService(BluetoothManager::class.java)?.adapter?.takeIf { it.isEnabled }?.getRemoteDevice(address)
+        get() = context.getSystemService(BluetoothManager::class.java)?.adapter?.takeIf { it.isEnabled }?.let { scanned.find(address) ?: it.getRemoteDevice(address) }
             ?: throw BleException(BleError.BluetoothOff)
 
     override suspend fun connect() {

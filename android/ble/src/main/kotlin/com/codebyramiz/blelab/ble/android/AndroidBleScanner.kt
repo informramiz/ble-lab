@@ -18,6 +18,7 @@ import com.codebyramiz.blelab.ble.model.ScanUpdate
 import com.codebyramiz.blelab.ble.model.ScannedDevice
 import com.codebyramiz.blelab.ble.protocol.GattProfile
 import com.codebyramiz.blelab.ble.scan.KnownDevices
+import com.codebyramiz.blelab.ble.scan.ScanDeviceCache
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -28,7 +29,10 @@ import java.util.UUID
  * controller drop unrelated advertisements before they wake the app.
  * See https://developer.android.com/develop/connectivity/bluetooth/ble/find-ble-devices
  */
-class AndroidBleScanner(private val context: Context) : BleScanner {
+class AndroidBleScanner(
+    private val context: Context,
+    private val scanned: ScanDeviceCache<BluetoothDevice> = ScanDeviceCache(),
+) : BleScanner {
     // Permission is checked by BlePermissionCheck just above every call; lint cannot follow it.
     @SuppressLint("MissingPermission")
     override fun scan(serviceFilter: UUID?): Flow<ScanUpdate> = callbackFlow {
@@ -39,6 +43,7 @@ class AndroidBleScanner(private val context: Context) : BleScanner {
 
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                scanned.remember(result.device.address, result.device)
                 val uuids = result.scanRecord?.serviceUuids.orEmpty()
                 trySend(
                     ScanUpdate.Found(
