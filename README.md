@@ -99,6 +99,16 @@ The screen shows the connection state, the live die temperature, and a lamp that
 python3 firmware/tools/snap.py --port /dev/cu.usbmodem<N> --out screen.png --mode snap   # or snapc
 ```
 
+**Drive the board like adb (screenshots + taps):** `firmware/tools/board.py` wraps the serial console so an agent or a script can see the screen and touch it, the way `adb exec-out screencap` and `adb shell input tap` work on Android. Injected touches take the same path as a finger: ripple on screen, touch notify over BLE (flagged as injected).
+
+```sh
+python3 firmware/tools/board.py --port COM4 snap screen.png              # screenshot
+python3 firmware/tools/board.py --port COM4 tap 160 180 --snap after.png # tap, then screenshot
+python3 firmware/tools/board.py --port COM4 hold 160 180                 # long press
+python3 firmware/tools/board.py --port COM4 imu                          # one IMU sample
+python3 firmware/tools/board.py --port COM4 log --seconds 10             # serial log
+```
+
 ```sh
 arduino-cli lib install M5Unified@0.3.0
 arduino-cli compile --fqbn esp32:esp32:m5stack_cores3 firmware/ble_lab
