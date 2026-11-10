@@ -224,7 +224,9 @@ Core Bluetooth adapter, scan/device models) and `App/BLELab` (SwiftUI views only
 iOS-specific notes:
 - **MTU**: iOS negotiates it itself; the app reads `maximumWriteValueLength(for:)` instead of requesting one.
 - **Pairing**: there is no `createBond()`. iOS shows the pairing prompt when a write hits the
-  encrypted LED characteristic; a cancelled prompt surfaces as `.pairingFailed`.
+  encrypted LED characteristic; a cancelled prompt surfaces as `.pairingFailed`. The LED write is with response and the switch
+  shows the board-confirmed state only; an unanswered write times out after 45 s and the error tells
+  the user to type the code shown on the board.
 - **Firmware update**: chunks are sized from `maximumWriteValueLength(for: .withoutResponse)`, and the data
   writes wait on `canSendWriteWithoutResponse` and `peripheralIsReady(toSendWriteWithoutResponse:)`, because
   Core Bluetooth drops a write-without-response when its queue is full. The card picks the file with `fileImporter`.

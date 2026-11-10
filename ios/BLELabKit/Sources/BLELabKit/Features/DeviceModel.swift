@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Device screen state on top of `ConnectionManager`: a rolling chart window, the LED switch
-/// with optimistic update and rollback, and a short event log.
+/// (shown state is the board-confirmed one), and a short event log.
 @MainActor
 @Observable
 public final class DeviceModel {
@@ -15,6 +15,8 @@ public final class DeviceModel {
     public private(set) var samples: [Telemetry] = []
     public private(set) var ledOn = false
     public private(set) var ledPending = false
+    /// The state the user asked for while the write is unconfirmed.
+    public private(set) var requestedLED: Bool?
     public private(set) var writeError: BLEError?
     public private(set) var log: [String] = []
     public private(set) var motion: [MotionSample] = []
@@ -134,18 +136,23 @@ public final class DeviceModel {
         }
     }
 
+    /// Asks the board to switch the LED. `ledOn` changes only once the board has acknowledged the write;
+    /// while it is pending `ledPending` is true and `requestedLED` holds the target. A failure leaves `ledOn`
+    /// as it was and sets `writeError`.
     public func setLED(_ on: Bool) async {
         guard canWrite else { return }
-        let previous = ledOn
-        ledOn = on
         ledPending = true
+        requestedLED = on
         writeError = nil
-        defer { ledPending = false }
+        defer {
+            ledPending = false
+            requestedLED = nil
+        }
         do throws(BLEError) {
             try await manager.setLED(on)
+            ledOn = on
             append("LED \(on ? "on" : "off")")
         } catch {
-            ledOn = previous
             writeError = error
             append("LED write failed: \(error.message)")
         }
@@ -172,7 +179,7 @@ public final class DeviceModel {
             messageStatus = .shown(text.trimmingCharacters(in: .whitespacesAndNewlines))
             append("Message sent")
         } catch {
-            messageStatus = .failed(error.message)
+            messageStatus = .failed(error.userMessage)
             append("Message failed: \(error.message)")
         }
     }

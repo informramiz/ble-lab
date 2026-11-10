@@ -40,6 +40,27 @@ public enum BLEError: Error, Equatable, Sendable {
     }
 }
 
+extension BLEError {
+    /// What the user can do about it; nil when there is nothing specific to say.
+    public var guidance: String? {
+        switch self {
+        case .pairingFailed, .insufficientEncryption:
+            "Pair with the board: tap the switch again and, when iOS asks, type the 6-digit code shown on the board's screen. If iOS never asks, forget the board in Settings > Bluetooth and try again."
+        case .timeout:
+            "If no pairing prompt appeared, forget the board in Settings > Bluetooth, reconnect and try again."
+        case .unauthorized:
+            "Allow Bluetooth for BLE Lab in Settings > Privacy & Security > Bluetooth."
+        default:
+            nil
+        }
+    }
+
+    /// `message` plus `guidance`, for text shown to the user after a failed action.
+    public var userMessage: String {
+        guidance.map { "\(message). \($0)" } ?? message
+    }
+}
+
 public struct DeviceInfo: Equatable, Sendable {
     public var manufacturer: String?
     public var model: String?

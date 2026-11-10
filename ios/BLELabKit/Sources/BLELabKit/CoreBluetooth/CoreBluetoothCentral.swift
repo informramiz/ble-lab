@@ -23,7 +23,21 @@ public final class CoreBluetoothCentral: NSObject, BLECentral, @unchecked Sendab
     private var seen: [UUID: CBPeripheral] = [:]
     private var connecting: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var links: [UUID: CoreBluetoothLink] = [:]
+    private var availabilityObservers: [UUID: AsyncStream<Bool>.Continuation] = [:]
     public private(set) var restoredPeripheralIDs: [UUID] = []
+
+    /// Follows `centralManagerDidUpdateState`: `true` on every move to `.poweredOn`, `false` on off, denied or unsupported.
+    public var radioAvailability: AsyncStream<Bool> {
+        AsyncStream { continuation in
+            let key = UUID()
+            queue.async {
+                self.availabilityObservers[key] = continuation
+                // A subscriber arriving after the state settled still learns it.
+                if self.manager.state == .poweredOn { continuation.yield(true) }
+            }
+            continuation.onTermination = { _ in self.queue.async { self.availabilityObservers[key] = nil } }
+        }
+    }
 
     public override init() {
         super.init()
@@ -132,9 +146,11 @@ extension CoreBluetoothCentral: CBCentralManagerDelegate {
         let waiters = poweredOn
         switch central.state {
         case .poweredOn:
+            availabilityObservers.values.forEach { $0.yield(true) }
             poweredOn = []
             waiters.forEach { $0.resume() }
         case .unauthorized, .unsupported, .poweredOff:
+            availabilityObservers.values.forEach { $0.yield(false) }
             poweredOn = []
             let error = central.state == .unauthorized ? BLEError.unauthorized : .bluetoothUnavailable(reason: "Bluetooth is off")
             waiters.forEach { $0.resume(throwing: error) }

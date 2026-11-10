@@ -182,16 +182,18 @@ private struct LedCard: View {
                     .animation(.easeInOut, value: model.ledOn)
                 VStack(alignment: .leading) {
                     Text(model.ledOn ? "On" : "Off").font(.headline)
-                    Text("Encrypted write; iOS asks to pair the first time.").font(.caption).foregroundStyle(.secondary)
+                    Text(model.ledPending ? "Waiting for the board. If iOS asks to pair, type the code shown on the board." : "Encrypted write; iOS asks to pair the first time.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if model.ledPending { ProgressView() }
                 Toggle("LED", isOn: Binding(get: { model.ledOn }, set: { on in Task { await model.setLED(on) } }))
                     .labelsHidden()
                     .disabled(!model.canWrite)
                     .accessibilityIdentifier("ledSwitch")
             }
             if let error = model.writeError {
-                Label(error.message, systemImage: "lock.trianglebadge.exclamationmark").font(.footnote).foregroundStyle(.red)
+                Label(error.userMessage, systemImage: "lock.trianglebadge.exclamationmark").font(.footnote).foregroundStyle(.red)
             }
         }
     }
