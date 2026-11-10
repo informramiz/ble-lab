@@ -45,7 +45,8 @@ extension BLEError {
     public var guidance: String? {
         switch self {
         case .pairingFailed, .insufficientEncryption:
-            "Pair with the board: tap the switch again and, when iOS asks, type the 6-digit code shown on the board's screen. If iOS never asks, forget the board in Settings > Bluetooth and try again."
+            // iOS asks for the code once per connection, so a retry on the same link gets no prompt.
+            "Pairing needs a new connection: go back, connect to the board again and tap the switch. When iOS asks, type the 6-digit code shown on the board's screen. If iOS never asks, forget the board in Settings > Bluetooth first."
         case .timeout:
             "If no pairing prompt appeared, forget the board in Settings > Bluetooth, reconnect and try again."
         case .unauthorized:

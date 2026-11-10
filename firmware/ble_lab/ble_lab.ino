@@ -39,6 +39,10 @@ static BLECharacteristic *touchChar = nullptr;
 static BLECharacteristic *messageChar = nullptr;
 static BLECharacteristic *otaStatusChar = nullptr;
 static volatile bool connected = false;
+// True from the passkey prompt until pairing ends. Sensor notifications pause meanwhile: a data PDU that
+// lands while the link starts encryption makes iOS drop the link with a MIC failure (HCI 0x3D).
+static volatile bool pairing = false;
+static inline bool canStream() { return connected && !pairing; }
 static bool ledOn = false;
 static uint32_t sequence = 0;
 static uint32_t lastNotifyMs = 0;
@@ -173,7 +177,7 @@ static void sampleMotion(uint32_t now) {
   if (!board_sensors::readImu(s)) return;
   tiltX += 0.2f * (s.ax - tiltX);
   tiltY += 0.2f * (s.ay - tiltY);
-  if (connected) appendMotion(s, now);
+  if (canStream()) appendMotion(s, now);
 }
 
 static void sendTouch(uint8_t kind, int16_t x, int16_t y, bool injected) {
@@ -190,7 +194,7 @@ static void sendTouch(uint8_t kind, int16_t x, int16_t y, bool injected) {
   putU16(out + 4, (uint16_t)x);
   putU16(out + 6, (uint16_t)y);
   touchChar->setValue(out, TOUCH_LENGTH);
-  if (connected) touchChar->notify();
+  if (canStream()) touchChar->notify();
 }
 
 // Debug screenshot: base64 PNG between marker lines. Runs in loop(), so BLE events wait for it
@@ -269,6 +273,7 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer *s) override {
     connected = false;
+    pairing = false;
     screenDirty = true;
     if (ota.active()) {
       ota.abort();
@@ -283,6 +288,7 @@ class ServerCallbacks : public BLEServerCallbacks {
 // the key; loop() draws it.
 class PairingCallbacks : public BLESecurityCallbacks {
   void onPassKeyNotify(uint32_t passkey) override {
+    pairing = true;
     Serial.printf("pairing passkey: %06u\n", (unsigned)passkey);
     passkeyShown = passkey;
     passkeyUntilMs = millis() + PASSKEY_SHOW_MS;
@@ -290,6 +296,7 @@ class PairingCallbacks : public BLESecurityCallbacks {
     screenDirty = true;
   }
   void finish() {
+    pairing = false;
     passkeyUntilMs = 0;
     screenDirty = true;
   }
@@ -299,6 +306,47 @@ class PairingCallbacks : public BLESecurityCallbacks {
   void onAuthenticationComplete(ble_gap_conn_desc *, int) override { finish(); }
 #endif
 };
+
+#if defined(CONFIG_NIMBLE_ENABLED)
+// Security diagnostics: the core's callbacks drop the SMP reason and the disconnect reason, so
+// pairing failures were silent. A NimBLE GAP listener sees every event the server handler sees.
+// Status values: 0 = ok, 0x200+ = HCI error (BLE_HS_ERR_HCI_BASE), 0x300+ = local SMP error,
+// 0x400+ = SMP error sent by the peer (BLE_HS_ERR_SM_PEER_BASE).
+static ble_gap_event_listener gapDiagListener;
+static int onGapDiag(struct ble_gap_event *event, void *) {
+  switch (event->type) {
+    case BLE_GAP_EVENT_DISCONNECT:
+      Serial.printf("gap: disconnect reason=0x%03x\n", event->disconnect.reason);
+      break;
+    case BLE_GAP_EVENT_ENC_CHANGE: {
+      ble_gap_conn_desc d;
+      if (ble_gap_conn_find(event->enc_change.conn_handle, &d) == 0) {
+        Serial.printf("gap: enc_change status=0x%03x encrypted=%d authenticated=%d bonded=%d key_size=%d\n",
+                      event->enc_change.status, d.sec_state.encrypted, d.sec_state.authenticated, d.sec_state.bonded,
+                      d.sec_state.key_size);
+      } else {
+        Serial.printf("gap: enc_change status=0x%03x\n", event->enc_change.status);
+      }
+      break;
+    }
+    case BLE_GAP_EVENT_PARING_COMPLETE:
+      Serial.printf("gap: pairing_complete status=0x%03x\n", event->pairing_complete.status);
+      break;
+    case BLE_GAP_EVENT_REPEAT_PAIRING:
+      Serial.println("gap: repeat pairing, old bond deleted");
+      break;
+    case BLE_GAP_EVENT_CONN_UPDATE:
+      Serial.printf("gap: conn_update status=0x%03x\n", event->conn_update.status);
+      break;
+    case BLE_GAP_EVENT_MTU:
+      Serial.printf("gap: mtu=%u\n", event->mtu.value);
+      break;
+    default:
+      break;
+  }
+  return 0;
+}
+#endif
 
 class MessageCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
@@ -477,6 +525,9 @@ void setup() {
   // Phones that don't pair first still get Insufficient Authentication on the protected characteristics.
   security->setForceAuthentication(false);
   BLEDevice::setSecurityCallbacks(new PairingCallbacks());
+#if defined(CONFIG_NIMBLE_ENABLED)
+  ble_gap_event_listener_register(&gapDiagListener, onGapDiag, nullptr);
+#endif
 
   server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
@@ -525,7 +576,7 @@ void loop() {
     return;
   }
   sampleMotion(now);
-  if (connected && now - lastNotifyMs >= TELEMETRY_PERIOD_MS) {
+  if (canStream() && now - lastNotifyMs >= TELEMETRY_PERIOD_MS) {
     lastNotifyMs = now;
     uint8_t payload[TELEMETRY_LENGTH];
     encodeTelemetry(payload);
@@ -533,7 +584,7 @@ void loop() {
     telemetryChar->notify();  // No-op for a central that has not enabled the CCCD.
     sequence++;
   }
-  if (!connected) motionCount = 0;  // Drop a half-built batch from the previous link.
+  if (!canStream()) motionCount = 0;  // Drop a half-built batch from the previous link.
 
   board_sensors::TouchEvent touch;
   if (board_sensors::pollTouch(touch)) sendTouch(touch.kind, touch.x, touch.y, false);
