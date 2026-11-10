@@ -15,9 +15,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -29,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -60,7 +63,7 @@ import com.codebyramiz.blelab.ui.components.RssiBars
 import com.codebyramiz.blelab.ui.theme.MonoStyle
 
 @Composable
-fun ScanRoute(onOpenDevice: (ScannedDevice) -> Unit, viewModel: ScanViewModel = hiltViewModel()) {
+fun ScanRoute(onOpenDevice: (ScannedDevice) -> Unit, onOpenHistory: () -> Unit, viewModel: ScanViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var granted by remember { mutableStateOf(BlePermissions.granted(context)) }
@@ -84,6 +87,7 @@ fun ScanRoute(onOpenDevice: (ScannedDevice) -> Unit, viewModel: ScanViewModel = 
             viewModel.stopScan()
             onOpenDevice(device)
         },
+        onOpenHistory = onOpenHistory,
     )
 }
 
@@ -99,6 +103,7 @@ fun ScanScreen(
     onRequestPermissions: () -> Unit,
     onEnableBluetooth: () -> Unit,
     onOpenDevice: (ScannedDevice) -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -110,6 +115,11 @@ fun ScanScreen(
                     Column {
                         Text(stringResource(R.string.scan_title))
                         Text(stringResource(R.string.scan_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenHistory, modifier = Modifier.testTag("historyButton")) {
+                        Icon(painterResource(R.drawable.ic_history), contentDescription = stringResource(R.string.history_open))
                     }
                 },
                 scrollBehavior = scrollBehavior,
@@ -216,7 +226,8 @@ private fun DeviceRow(device: ScannedDevice, onClick: () -> Unit, modifier: Modi
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = modifier.fillMaxWidth().testTag("device-${device.address}"),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
+        // Fixed minimum height and trailing width: a paired row (no signal) and a live row measure alike.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 76.dp).padding(16.dp)) {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(painterResource(R.drawable.ic_memory), contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -236,9 +247,14 @@ private fun DeviceRow(device: ScannedDevice, onClick: () -> Unit, modifier: Modi
                 }
                 Text(device.address, style = MonoStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Column(horizontalAlignment = Alignment.End) {
-                RssiBars(device.rssi)
-                Text(stringResource(R.string.scan_rssi, device.rssi), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.Center, modifier = Modifier.widthIn(min = 56.dp)) {
+                val rssi = device.rssi
+                if (rssi != null) {
+                    RssiBars(rssi)
+                    Text(stringResource(R.string.scan_rssi, rssi), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text(stringResource(R.string.scan_paired), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

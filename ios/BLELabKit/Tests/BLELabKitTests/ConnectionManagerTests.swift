@@ -20,7 +20,7 @@ import Testing
         let manager = makeManager()
         manager.connect(to: SimulatedPeripheral.demoID)
         #expect(await waitUntil { manager.state.isReady })
-        let expected = DeviceInfo(manufacturer: "Espressif", model: "ESP32-WROOM-32", firmware: "ble-lab 1.0.0")
+        let expected = DeviceInfo(manufacturer: "Espressif", model: "M5Stack CoreS3", firmware: "ble-lab 1.1.0")
         #expect(manager.state == .ready(info: expected, maxWriteLength: 244))
     }
 
@@ -160,5 +160,80 @@ import Testing
         #expect(!BLEError.serviceNotFound.isRetryable)
         #expect(!BLEError.pairingFailed.isRetryable)
         #expect(!BLEError.unauthorized.isRetryable)
+    }
+}
+
+@MainActor
+@Suite struct BoardFeatureTests {
+    let peripheral = SimulatedPeripheral()
+
+    func makeManager(_ peripheral: SimulatedPeripheral? = nil) -> ConnectionManager {
+        ConnectionManager(
+            central: SimulatedCentral(peripheral: peripheral ?? self.peripheral, latency: .zero, sleeper: RecordingSleeper()),
+            sleeper: RecordingSleeper(),
+            random: { 0.5 }
+        )
+    }
+
+    @Test func streamsMotionSamplesFlattenedFromBatches() async {
+        let manager = makeManager()
+        manager.connect(to: SimulatedPeripheral.demoID)
+        #expect(await waitUntil { manager.state.isReady })
+        #expect(await peripheral.pushMotion())
+        var iterator = manager.motion.makeAsyncIterator()
+        var times: [UInt32] = []
+        for _ in 0..<5 { if let sample = await iterator.next() { times.append(sample.boardMillis) } }
+        #expect(times == [0, 20, 40, 60, 80])
+    }
+
+    @Test func streamsTouches() async {
+        let manager = makeManager()
+        manager.connect(to: SimulatedPeripheral.demoID)
+        #expect(await waitUntil { manager.state.isReady })
+        #expect(await peripheral.touch(x: 100, y: 50, kind: .longPress))
+        var iterator = manager.touches.makeAsyncIterator()
+        let touch = await iterator.next()
+        #expect(touch == TouchEvent(index: 0, kind: .longPress, injected: false, x: 100, y: 50))
+    }
+
+    @Test func sendsMessagesToTheBoard() async throws {
+        let manager = makeManager()
+        manager.connect(to: SimulatedPeripheral.demoID)
+        #expect(await waitUntil { manager.state.isReady })
+        try await manager.sendMessage("  hello board ")
+        #expect(await peripheral.messages == ["hello board"])
+    }
+
+    @Test func blankMessageNeverReachesTheRadio() async {
+        let manager = makeManager()
+        manager.connect(to: SimulatedPeripheral.demoID)
+        #expect(await waitUntil { manager.state.isReady })
+        await #expect(throws: BLEError.unexpected("Message is blank")) { try await manager.sendMessage("   ") }
+        #expect(await peripheral.messages.isEmpty)
+    }
+
+    @Test func messageWriteNeedsPairingLikeTheLed() async {
+        await peripheral.configure(requireBonding: true, acceptBonding: false)
+        let manager = makeManager()
+        manager.connect(to: SimulatedPeripheral.demoID)
+        #expect(await waitUntil { manager.state.isReady })
+        await #expect(throws: BLEError.pairingFailed) { try await manager.sendMessage("hi") }
+    }
+
+    @Test func boardWithoutSensorsStillConnects() async {
+        let devKit = SimulatedPeripheral(hasBoardSensors: false)
+        let manager = makeManager(devKit)
+        manager.connect(to: SimulatedPeripheral.demoID)
+        #expect(await waitUntil { manager.state.isReady })
+        #expect(await devKit.pushMotion() == false)
+        await devKit.pushTelemetry()
+        var iterator = manager.telemetry.makeAsyncIterator()
+        let reading = await iterator.next()
+        #expect(reading?.hasMotionSensor == false)
+        #expect(reading?.hasTouchScreen == false)
+    }
+
+    @Test func sendingBeforeReadyFailsNotConnected() async {
+        await #expect(throws: BLEError.notConnected) { try await makeManager().sendMessage("hi") }
     }
 }

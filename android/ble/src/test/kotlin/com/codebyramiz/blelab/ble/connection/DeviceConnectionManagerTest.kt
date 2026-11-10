@@ -51,7 +51,7 @@ class DeviceConnectionManagerTest {
         val ready = manager.state.value as ConnectionState.Ready
         assertThat(ready.mtu).isEqualTo(GattProfile.PREFERRED_MTU)
         assertThat(ready.info.manufacturer).isEqualTo("Espressif")
-        assertThat(ready.info.firmware).isEqualTo("ble-lab 1.0.0")
+        assertThat(ready.info.firmware).isEqualTo("ble-lab 1.1.0")
     }
 
     @Test
@@ -133,29 +133,56 @@ class DeviceConnectionManagerTest {
     }
 
     @Test
-    fun `pairs when the LED needs an encrypted link, then retries the write`() = runTest {
+    fun `pairs right after connecting when the peripheral needs it`() = runTest {
         peripheral.requireBonding = true
         val manager = manager()
         val states = record(manager)
         manager.connect(peripheral.address)
         advanceTimeBy(3_000)
 
-        assertThat(manager.setLed(true).isSuccess).isTrue()
         assertThat(peripheral.bonded).isTrue()
-        assertThat(states.any { it is ConnectionState.Bonding }).isTrue()
+        val kinds = states.map { it::class }
+        assertThat(kinds.indexOf(ConnectionState.Bonding::class)).isLessThan(kinds.indexOf(ConnectionState.Discovering::class))
         assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
     }
 
     @Test
-    fun `reports rejected pairing and stays ready`() = runTest {
+    fun `does not reconnect while pairing is waiting for the user`() = runTest {
+        peripheral.requireBonding = true
+        val manager = manager()
+        val states = record(manager)
+        manager.connect(peripheral.address)
+        advanceTimeBy(500)
+
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Bonding::class.java)
+        assertThat(states.filterIsInstance<ConnectionState.Connecting>()).hasSize(1)
+        assertThat(states.filterIsInstance<ConnectionState.Reconnecting>()).isEmpty()
+    }
+
+    @Test
+    fun `fails without retrying when the user refuses pairing`() = runTest {
         peripheral.requireBonding = true
         peripheral.acceptBonding = false
         val manager = manager()
+        val states = record(manager)
+        manager.connect(peripheral.address)
+        advanceTimeBy(60_000)
+
+        val failed = manager.state.value as ConnectionState.Failed
+        assertThat(failed.error).isEqualTo(BleError.BondingFailed)
+        assertThat(states.filterIsInstance<ConnectionState.Connecting>()).hasSize(1)
+    }
+
+    @Test
+    fun `pairs on demand when the bond is lost mid-session, then retries the write`() = runTest {
+        peripheral.requireBonding = true
+        val manager = manager()
         manager.connect(peripheral.address)
         advanceTimeBy(3_000)
+        peripheral.forgetBond()
 
-        val result = manager.setLed(true)
-        assertThat((result.exceptionOrNull() as BleException).error).isEqualTo(BleError.BondingFailed)
+        assertThat(manager.setLed(true).isSuccess).isTrue()
+        assertThat(peripheral.bonded).isTrue()
         assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
     }
 
@@ -203,10 +230,74 @@ class DeviceConnectionManagerTest {
 
         override suspend fun write(service: UUID, characteristic: UUID, value: ByteArray) = Unit
 
+        override suspend fun writeWithoutResponse(service: UUID, characteristic: UUID, value: ByteArray) = Unit
+
         override suspend fun enableNotifications(service: UUID, characteristic: UUID) = Unit
+
+        override val isBonded: Boolean = true
 
         override suspend fun createBond() = Unit
 
         override fun close() = Unit
+    }
+
+    @Test
+    fun `streams motion samples unpacked from batches`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        manager.motion.test {
+            val first = awaitItem()
+            val second = awaitItem()
+            assertThat(second.boardMillis - first.boardMillis).isEqualTo(20)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `forwards board touches`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+        manager.touches.test {
+            peripheral.touch(120, 80)
+            val event = awaitItem()
+            assertThat(event.x).isEqualTo(120)
+            assertThat(event.y).isEqualTo(80)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `sends a message to the board`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+
+        assertThat(manager.sendMessage("  hi board ").isSuccess).isTrue()
+        assertThat(peripheral.messages).containsExactly("hi board")
+    }
+
+    @Test
+    fun `a blank message never reaches the radio`() = runTest {
+        val manager = manager()
+        manager.connect(peripheral.address)
+        advanceTimeBy(3_000)
+
+        assertThat(manager.sendMessage("  ").isFailure).isTrue()
+        assertThat(peripheral.messages).isEmpty()
+    }
+
+    @Test
+    fun `a board without sensors still connects and just stays silent`() = runTest {
+        val devKit = SimulatedPeripheral(hasBoardSensors = false)
+        val manager = DeviceConnectionManager({ devKit.newClient() }, backgroundScope, noJitter)
+        manager.connect(devKit.address)
+        advanceTimeBy(5_000)
+
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
+        manager.telemetry.test {
+            assertThat(awaitItem().hasImu).isFalse()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }

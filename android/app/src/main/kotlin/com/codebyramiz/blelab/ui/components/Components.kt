@@ -193,8 +193,9 @@ fun LiveChart(samples: List<Float>, modifier: Modifier = Modifier, capacity: Int
             drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
         }
         if (samples.size < 2) return@Canvas
-        val min = samples.min() - 0.5f
-        val max = samples.max() + 0.5f
+        val range = ChartScale.fit(samples)
+        val min = range.min
+        val max = range.max
         val step = size.width / (capacity - 1)
         val startX = size.width - step * (samples.size - 1)
         fun point(i: Int) = Offset(startX + i * step, size.height - (samples[i] - min) / (max - min) * size.height)

@@ -12,13 +12,18 @@ class ScanAggregator(private val staleAfterMillis: Long = 10_000) {
     fun add(device: ScannedDevice): List<ScannedDevice> {
         val previous = devices[device.address]
         // Scan responses often omit the name; keep the one we already learned.
-        devices[device.address] = device.copy(name = device.name ?: previous?.name)
+        devices[device.address] = device.copy(
+            name = device.name ?: previous?.name,
+            rssi = device.rssi ?: previous?.rssi,
+            isKnown = device.isKnown || previous?.isKnown == true,
+        )
         return snapshot(device.lastSeenMillis)
     }
 
     fun snapshot(nowMillis: Long): List<ScannedDevice> {
-        devices.values.removeAll { nowMillis - it.lastSeenMillis > staleAfterMillis }
-        return devices.values.sortedWith(compareByDescending<ScannedDevice> { it.isBleLab }.thenByDescending { it.rssi })
+        // A known device is not advertising, so silence says nothing about whether it is around.
+        devices.values.removeAll { !it.isKnown && nowMillis - it.lastSeenMillis > staleAfterMillis }
+        return devices.values.sortedWith(compareByDescending<ScannedDevice> { it.isBleLab }.thenByDescending { it.rssi ?: Int.MIN_VALUE })
     }
 
     fun clear() = devices.clear()

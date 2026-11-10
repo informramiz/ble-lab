@@ -47,8 +47,14 @@ struct SimulatedLink: GattLink {
 
     var maximumWriteLength: Int { get async { 244 } }  // ATT MTU 247 minus the 3-byte header.
 
+    var maximumWriteWithoutResponseLength: Int { get async { 244 } }
+
     func discoverServices() async throws(BLEError) -> Set<AttributeID> {
-        try await op { _ in [.custom(GattProfile.labService), .sig(GattProfile.deviceInfoService)] }
+        try await op { p in
+            var services: Set<AttributeID> = [.custom(GattProfile.labService), .sig(GattProfile.deviceInfoService)]
+            if p.supportsOta { services.insert(.custom(GattProfile.otaService)) }
+            return services
+        }
     }
 
     func read(_ characteristic: AttributeID, in service: AttributeID) async throws(BLEError) -> Data {
@@ -59,8 +65,12 @@ struct SimulatedLink: GattLink {
         try await op { p throws(BLEError) in try await p.write(value, to: characteristic) }
     }
 
+    func writeWithoutResponse(_ value: Data, to characteristic: AttributeID, in service: AttributeID) async throws(BLEError) {
+        try await op { p throws(BLEError) in try await p.writeWithoutResponse(value, to: characteristic) }
+    }
+
     func setNotify(_ enabled: Bool, for characteristic: AttributeID, in service: AttributeID) async throws(BLEError) {
-        try await op { p in await p.setNotify(enabled) }
+        try await op { p throws(BLEError) in try await p.setNotify(enabled, for: characteristic) }
     }
 
     func disconnect() async { await peripheral.centralDisconnected() }

@@ -10,14 +10,24 @@ public final class ConnectionManager {
     public private(set) var state: ConnectionState = .idle
     /// Every decoded notification, for one consumer (the device screen's model).
     public let telemetry: AsyncStream<Telemetry>
+    /// IMU samples, flattened from the board's batches (firmware 1.1.0+).
+    public let motion: AsyncStream<MotionSample>
+    /// Touches on the board's screen (firmware 1.1.0+).
+    public let touches: AsyncStream<TouchEvent>
+    /// True when the connected board has the OTA service (firmware 1.2.0+).
+    public private(set) var otaSupported = false
 
     private let central: any BLECentral
     private let backoff: BackoffPolicy
     private let sleeper: any Sleeper
     private let random: @Sendable () -> Double
     private let telemetryContinuation: AsyncStream<Telemetry>.Continuation
+    private let motionContinuation: AsyncStream<MotionSample>.Continuation
+    private let touchContinuation: AsyncStream<TouchEvent>.Continuation
     private var task: Task<Void, Never>?
     private var link: (any GattLink)?
+    /// Receives the OTA status notifications while an update runs; nil otherwise.
+    private var otaSink: AsyncStream<OtaStatus>.Continuation?
 
     public init(
         central: any BLECentral,
@@ -30,6 +40,8 @@ public final class ConnectionManager {
         self.sleeper = sleeper
         self.random = random
         (telemetry, telemetryContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
+        (motion, motionContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(256))
+        (touches, touchContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(32))
     }
 
     /// Starts (or restarts) connecting. Retries transient failures; gives up after `maxAttempts`.
@@ -57,6 +69,42 @@ public final class ConnectionManager {
         } catch .insufficientEncryption {
             throw .pairingFailed
         }
+    }
+
+    /// Shows `text` on the board's screen (encrypted write, like the LED). Blank text fails without
+    /// touching the radio; text over 64 bytes is cut at a character boundary.
+    public func sendMessage(_ text: String) async throws(BLEError) {
+        guard let payload = MessageCodec.encode(text) else { throw .unexpected("Message is blank") }
+        guard let link, case .ready = state else { throw .notConnected }
+        do throws(BLEError) {
+            try await link.write(payload, to: .custom(GattProfile.message), in: .custom(GattProfile.labService))
+        } catch .insufficientEncryption {
+            throw .pairingFailed
+        }
+    }
+
+    /// Sends `image` to the board. Needs a ready session on a board with the OTA service. The first
+    /// subscription to the board's status makes iOS ask for pairing (the passkey is on the board's screen);
+    /// a refusal fails with `.link(.pairingFailed)`. On success the board restarts and the session
+    /// reconnects by itself; watch `state` for that. Cancel the calling task to abort the transfer.
+    public func updateFirmware(_ image: FirmwareImage, onProgress: @escaping @Sendable (OtaProgress) -> Void) async throws(OtaFailure) {
+        guard let link, case .ready = state else { throw .link(.notConnected) }
+        guard otaSupported else { throw .link(.serviceNotFound) }
+        let (statuses, sink) = AsyncStream<OtaStatus>.makeStream(bufferingPolicy: .bufferingNewest(64))
+        otaSink = sink
+        defer {
+            otaSink = nil
+            sink.finish()
+        }
+        let ota = SessionOtaLink(link: link, status: statuses)
+        do throws(BLEError) {
+            try await link.setNotify(true, for: .custom(GattProfile.otaStatus), in: .custom(GattProfile.otaService))
+        } catch .insufficientEncryption {
+            throw .link(.pairingFailed)
+        } catch {
+            throw .link(error)
+        }
+        try await OtaUpdater(link: ota, sleeper: sleeper).run(image, onProgress: onProgress)
     }
 
     private func runWithReconnect(_ id: UUID) async {
@@ -94,8 +142,10 @@ public final class ConnectionManager {
         self.link = link
         do throws(BLEError) {
             state = .discovering
+            otaSupported = false
             let services = try await link.discoverServices()
             guard services.contains(.custom(GattProfile.labService)) else { throw .serviceNotFound }
+            otaSupported = services.contains(.custom(GattProfile.otaService))
             var info = DeviceInfo()
             if services.contains(.sig(GattProfile.deviceInfoService)) {
                 info.manufacturer = await readString(link, GattProfile.manufacturerName)
@@ -104,12 +154,28 @@ public final class ConnectionManager {
             }
             let events = link.events
             try await link.setNotify(true, for: .custom(GattProfile.telemetry), in: .custom(GattProfile.labService))
+            // Firmware 1.0.0 has neither characteristic; a refusal there must not fail the connection.
+            for optional in [GattProfile.motion, GattProfile.touch] {
+                do throws(BLEError) {
+                    try await link.setNotify(true, for: .custom(optional), in: .custom(GattProfile.labService))
+                } catch .serviceNotFound {
+                    continue
+                } catch .unexpected {
+                    continue
+                }
+            }
             state = .ready(info: info, maxWriteLength: await link.maximumWriteLength)
             onReady()
             for await event in events {
                 switch event {
                 case .notification(.custom(GattProfile.telemetry), let data):
                     if let reading = try? TelemetryCodec.decode(data) { telemetryContinuation.yield(reading) }
+                case .notification(.custom(GattProfile.motion), let data):
+                    if let batch = try? MotionCodec.decode(data) { batch.forEach { motionContinuation.yield($0) } }
+                case .notification(.custom(GattProfile.touch), let data):
+                    if let touch = try? TouchCodec.decode(data) { touchContinuation.yield(touch) }
+                case .notification(.custom(GattProfile.otaStatus), let data):
+                    if let status = OtaProtocol.decodeStatus(data) { otaSink?.yield(status) }
                 case .notification:
                     continue
                 case .disconnected(let reason):
@@ -127,5 +193,30 @@ public final class ConnectionManager {
     private func readString(_ link: any GattLink, _ characteristic: UInt16) async -> String? {
         guard let data = try? await link.read(.sig(characteristic), in: .sig(GattProfile.deviceInfoService)) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+}
+
+/// The OTA characteristics of one connected session, for `OtaUpdater`. Writes that need an encrypted
+/// link surface as `.pairingFailed` when the user declines the system pairing prompt.
+private struct SessionOtaLink: OtaLink {
+    let link: any GattLink
+    let status: AsyncStream<OtaStatus>
+
+    var dataChunkSize: Int { get async { await link.maximumWriteWithoutResponseLength } }
+
+    func writeControl(_ value: Data) async throws(BLEError) {
+        do throws(BLEError) {
+            try await link.write(value, to: .custom(GattProfile.otaControl), in: .custom(GattProfile.otaService))
+        } catch .insufficientEncryption {
+            throw .pairingFailed
+        }
+    }
+
+    func writeData(_ value: Data) async throws(BLEError) {
+        do throws(BLEError) {
+            try await link.writeWithoutResponse(value, to: .custom(GattProfile.otaData), in: .custom(GattProfile.otaService))
+        } catch .insufficientEncryption {
+            throw .pairingFailed
+        }
     }
 }

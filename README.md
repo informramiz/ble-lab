@@ -8,6 +8,24 @@ One Bluetooth Low Energy profile, three codebases:
 | [`android/`](android) | Android central | Kotlin 2.4, Jetpack Compose (Material 3), Hilt, coroutines/Flow |
 | [`ios/`](ios) | iOS central | Swift 6 (strict concurrency), SwiftUI, Swift Charts, Core Bluetooth |
 
+## What it does
+
+Connect a phone to an ESP32 over Bluetooth Low Energy and use it as a small IoT console:
+
+- **Live telemetry**: a sensor value streams to a live chart five times a second.
+- **Motion dashboard**: boards with a motion sensor (M5Stack CoreS3) stream accelerometer and gyroscope
+  data; the Android app draws live charts and a tilt indicator. A plain ESP32 DevKit has no sensor, so
+  the app says so instead of showing empty charts.
+- **Two-way control**: switch the board LED, send a text message that appears on the board screen, and
+  see taps and long presses on the board touchscreen show up in the app.
+- **Recording and history**: record a telemetry and motion session on the phone (Room database), browse
+  past sessions, open a session chart, and export it as CSV through the share sheet.
+- **No board needed**: a built-in simulated ESP32 shows up as a "demo" device.
+
+- **Signed over-the-air firmware update (Android)**: pick a signed `.signed.bin`; the app streams it over BLE, the board verifies an ECDSA P-256 signature and refuses unsigned, wrong-key and older images.
+
+The Android app has all of this. The iOS app has the same, including the signed firmware update (Kit and simulator tested, not yet run against a real board).
+
 Both apps scan, connect, negotiate MTU, discover services, stream notifications into a live chart,
 write a characteristic, pair when the peripheral asks, and reconnect with exponential backoff.
 The radio sits behind an interface on both platforms, with an in-memory simulated ESP32 behind
@@ -19,12 +37,17 @@ you can use with no board at all.
 | Item | UUID | Properties | Payload |
 |---|---|---|---|
 | Lab service | `B1E1AB00-5A1E-4C3A-9F5E-C0DE00B1E1AB` | primary, advertised | |
-| Telemetry | `B1E1AB01-…-C0DE00B1E1AB` | read, notify (every 200 ms) | 7 bytes little-endian: `u32 seq`, `i16 value × 100`, `u8 flags` (bit 0 = LED) |
+| Telemetry | `B1E1AB01-…-C0DE00B1E1AB` | read, notify (every 200 ms) | 7 bytes little-endian: `u32 seq`, `i16 value × 100`, `u8 flags` (bit 0 = LED on, bit 1 = board has a motion sensor, bit 2 = board has a touchscreen) |
 | LED | `B1E1AB02-…-C0DE00B1E1AB` | read, **encrypted** write | 1 byte: `0x00` off, `0x01` on |
+| Motion | `B1E1AB03-…-C0DE00B1E1AB` | notify (50 Hz, batched) | header 8 bytes little-endian: `u32 t_ms` (board clock at the first sample), `u16 first sample index` (wraps), `u8 count`, `u8 period_ms`; then `count × 12` bytes: `i16 ax, ay, az` in milli-g, `i16 gx, gy, gz` in 0.1 deg/s. Batch size follows the MTU (1 sample at MTU 23, up to 5) |
+| Touch | `B1E1AB04-…-C0DE00B1E1AB` | notify | 8 bytes little-endian: `u16 event index` (wraps), `u8 kind` (1 tap, 2 long press), `u8 flags` (bit 0 = injected from the serial console), `u16 x`, `u16 y` (pixels, 320×240) |
+| Message | `B1E1AB05-…-C0DE00B1E1AB` | **encrypted** write | UTF-8 text, 1 to 64 bytes, shown on the board screen |
+| OTA control / data / status | service `B1E1AB10-…`; control `…11`, data `…12`, status `…13` | **MITM-encrypted** write / write without response / read, notify | START `01`: `u32 size`, 32-byte SHA-256, `u32 version code`, 64-byte raw `r||s` signature (105 bytes); ABORT `02`; FINISH `03`. Status: `u8 state`, `u8 error`, `u32 offset`. New errors: 11 bad signature, 12 downgrade |
 | Device Information | `0x180A` | read | Manufacturer `0x2A29`, Model `0x2A24`, Firmware `0x2A26` |
 
-Preferred ATT MTU 247. The LED write needs an encrypted link, so the first write triggers
-"Just Works" pairing (no PIN; the board has no display or keypad). On chips with an internal
+Preferred ATT MTU 247. The LED and message writes need an encrypted link; the OTA writes need an authenticated one:
+the board shows a 6-digit passkey on its screen (display-only IO capability) and the phone asks for it, so a
+man-in-the-middle cannot pair. Boards bonded under the older "Just Works" firmware must be forgotten and paired again. On chips with an internal
 temperature sensor (S2, S3, C3, C6…) the value is the die temperature; the original ESP32 has none,
 so it streams a smooth synthetic wave around 24.
 
@@ -36,7 +59,7 @@ flowchart LR
   subgraph App["Android / iOS app"]
     UI[Compose / SwiftUI screens] --> VM[ViewModel / @Observable model]
     VM --> CM[Connection manager<br/>state machine + backoff]
-    CM --> IF{{GattClient / GattLink<br/>interface}}
+    CM --> IF{{GattClient<br/>interface}}
     IF --> REAL[android.bluetooth /<br/>Core Bluetooth adapter]
     IF --> SIM[Simulated ESP32<br/>tests, screenshots, demo]
   end
@@ -75,7 +98,34 @@ arduino-cli lib install M5Unified@0.3.0
 arduino-cli compile --fqbn esp32:esp32:m5stack_cores3 firmware/ble_lab
 arduino-cli upload  --fqbn esp32:esp32:m5stack_cores3 -p /dev/cu.usbmodem<N> firmware/ble_lab
 ```
-CoreS3 build: 826,911 bytes of flash (26%), 32,296 bytes of RAM (9%).
+CoreS3 build (1.2.0): 1,333,323 bytes of flash (42% of a 3 MB slot), 33,456 bytes of RAM (10%).
+
+**Over-the-air update (1.3.0, signed).** The CoreS3 partition scheme that arduino-cli picks by default,
+`PartitionScheme=app3M_fat9M_16MB` ("16M Flash (3MB APP/9.9MB FATFS)", `app3M_fat9M_16MB.csv` in the core), has two
+3 MB app slots, `ota_0` at 0x10000 and `ota_1` at 0x310000, plus `otadata`. The firmware receives an image over BLE with
+the Arduino-ESP32 `Update` library, checks its SHA-256, reboots into the other slot and confirms the new image about 5 s
+after boot; a crash before that makes the bootloader roll back (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` in the
+core's CoreS3 build). Build the `.bin` the apps flash, naming the scheme so it cannot drift:
+
+```sh
+arduino-cli compile --fqbn esp32:esp32:m5stack_cores3:PartitionScheme=app3M_fat9M_16MB \
+  --output-dir firmware/ble_lab/build firmware/ble_lab
+# update file: firmware/ble_lab/build/ble_lab.ino.bin   (not ...merged.bin, which includes the bootloader)
+```
+
+**Signing.** The board only accepts images signed with the key whose public half is compiled in
+(`ota_public_key.h`). Version code is `major*10000 + minor*100 + patch`; a lower version than the running one is refused (anti-rollback).
+
+```sh
+python3 firmware/tools/sign_firmware.py keygen          # once; writes firmware/tools/keys/ota-dev-private.pem (git-ignored) and the public key header
+python3 firmware/tools/sign_firmware.py sign firmware/ble_lab/build/ble_lab.ino.bin   # -> ble_lab.ino.signed.bin, the file the app flashes
+```
+
+The signature covers `"BLFW1" | size | version | SHA-256(image)` and is checked before `Update.end`. This is a
+demo-grade scheme: production should use ESP-IDF Secure Boot v2 (bootloader-verified signatures) and flash encryption.
+
+The first OTA-capable build has to go over USB. The generic ESP32 build (`esp32:esp32:esp32`, 1,111,987 bytes) also
+fits the default two 1.25 MB slots, but the OTA path has only been designed against the CoreS3 scheme.
 
 Tested on hardware (CoreS3, firmware 1.0.0): a Pixel 4a (5G) on Android finds the board, connects (MTU 247),
 streams telemetry at 5 Hz, pairs on the first LED write, and switches the lamp on and off; the state is read back from
@@ -95,6 +145,11 @@ cd android
 
 minSdk 26, targetSdk 37, compileSdk 37. AGP 9.5 with its built-in Kotlin support, version catalog in `gradle/libs.versions.toml`.
 
+Screens: scan, device (Live, Motion and Board tabs), history, and session detail. Recording is a
+`SessionRecorder` behind a `RecordingRepository` port (Room 3 adapter, in-memory fake for tests); an
+open recording is closed when you leave the device screen, and a session left open by a killed process
+shows as "Not closed" in history. CSV export goes through a `FileProvider` and `ACTION_SEND`.
+
 Modules: `:ble` (pure Kotlin domain: GATT profile, codec, connection state machine, backoff, simulated
 peripheral; plus the thin `android.bluetooth` adapters) and `:app` (Compose UI, ViewModels, permissions, Hilt wiring).
 
@@ -102,7 +157,7 @@ What the Android side handles:
 - **Permissions**: `BLUETOOTH_SCAN` (`neverForLocation`) and `BLUETOOTH_CONNECT` on API 31+;
   `ACCESS_FINE_LOCATION` on API 30 and below, as the platform requires for scan results there.
 - **Scanning**: `ScanFilter` on the lab service UUID (toggle off to see every device), low-latency
-  mode, results aggregated and aged out, a 10 s scan window to save battery.
+  mode, results aggregated and aged out, a 12 s scan window to save battery.
 - **Connecting**: `connectGatt(…, autoConnect = false, TRANSPORT_LE)`; one GATT operation at a time
   behind a `Mutex`, each with a timeout because some stacks never call back; MTU request, service
   discovery, CCCD write for notifications, then the high connection priority.
@@ -135,6 +190,10 @@ iOS-specific notes:
 - **MTU**: iOS negotiates it itself; the app reads `maximumWriteValueLength(for:)` instead of requesting one.
 - **Pairing**: there is no `createBond()`. iOS shows the pairing prompt when a write hits the
   encrypted LED characteristic; a cancelled prompt surfaces as `.pairingFailed`.
+- **Firmware update**: chunks are sized from `maximumWriteValueLength(for: .withoutResponse)`, and the data
+  writes wait on `canSendWriteWithoutResponse` and `peripheralIsReady(toSendWriteWithoutResponse:)`, because
+  Core Bluetooth drops a write-without-response when its queue is full. The card picks the file with `fileImporter`.
+  The pairing prompt appears when the OTA status subscription is made, i.e. when Update is tapped.
 - **State restoration**: the central is created with `CBCentralManagerOptionRestoreIdentifierKey`
   and `UIBackgroundModes = bluetooth-central`, and records restored peripheral IDs in
   `centralManager(_:willRestoreState:)`. Full relaunch-into-session handling is a device-only flow
@@ -146,6 +205,10 @@ iOS-specific notes:
 
 Recorded by Roborazzi on the JVM (Robolectric, API 36) against the simulated peripheral:
 [`docs/screenshots/android`](docs/screenshots/android).
+
+| Motion | Board | History | Session |
+|---|---|---|---|
+| <img src="docs/screenshots/android/device_motion_light.png" width="200" alt="Motion tab with tilt and charts"> | <img src="docs/screenshots/android/device_board_light.png" width="200" alt="Board tab with touches and message"> | <img src="docs/screenshots/android/history_light.png" width="200" alt="Recorded sessions"> | <img src="docs/screenshots/android/session_detail_light.png" width="200" alt="Session chart and CSV export"> |
 
 ### iOS
 
@@ -160,12 +223,12 @@ built-in demo peripheral: [`docs/screenshots/ios`](docs/screenshots/ios).
 
 | Suite | What it proves |
 |---|---|
-| Android `:ble` (33 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop |
-| Android `:app` (18 tests, 9 of them screenshots) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up), Roborazzi screenshots of each screen state |
-| iOS `BLELabKit` (34 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing |
+| Android `:ble` (106 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
+| Android `:app` (84 tests, 28 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
+| iOS `BLELabKit` (141 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing, and the OTA path: `.signed.bin` parsing, START/data/END framing, flow-control window, progress, cancel, bad-signature/downgrade/too-large rejections, reboot confirmation |
 
 CI (`.github/workflows/ci.yml`): Android format, lint, unit and screenshot verification, Kover line
-coverage gate (80% minimum; currently 92.6% of lines, radio adapters excluded); firmware compile; iOS `swift test` and the simulator build.
+coverage gate (80% minimum; currently 92.7% of lines, radio adapters excluded); firmware compile; iOS `swift test` and the simulator build.
 
 ## On-device checklist
 
@@ -195,7 +258,7 @@ coverage and checked by hand:
 ## Patterns followed
 
 - Ports and adapters: the connection state machine depends only on the
-  [`GattClient`](android/ble/src/main/kotlin/com/codebyramiz/blelab/ble/GattClient.kt) / `GattLink` interface;
+  [`GattClient`](android/ble/src/main/kotlin/com/codebyramiz/blelab/ble/Transport.kt) interface (with `GattClientFactory`, `BleScanner` and `BluetoothStateMonitor`, all in `Transport.kt`);
   the platform adapter and the simulated peripheral are interchangeable.
 - Unidirectional data flow with immutable UI state ([Android app architecture](https://developer.android.com/topic/architecture)).
 - Typed errors (`BleError` sealed type, Swift typed throws) instead of raw status codes.

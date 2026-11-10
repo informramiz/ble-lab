@@ -7,11 +7,20 @@ import androidx.lifecycle.viewModelScope
 import com.codebyramiz.blelab.MainDispatcherRule
 import com.codebyramiz.blelab.ble.GattClientFactory
 import com.codebyramiz.blelab.ble.model.ConnectionState
+import com.codebyramiz.blelab.ble.model.TouchKind
+import com.codebyramiz.blelab.ble.ota.OtaSignatureVerifier
+import com.codebyramiz.blelab.ble.protocol.OtaError
 import com.codebyramiz.blelab.ble.simulated.SimulatedPeripheral
+import com.codebyramiz.blelab.recording.FakeRecordingRepository
+import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.ui.device.DeviceViewModel
+import com.codebyramiz.blelab.ui.device.FirmwareUpdate
+import com.codebyramiz.blelab.ui.device.MessageStatus
+import com.codebyramiz.blelab.ui.device.Tilt
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -22,11 +31,15 @@ import org.junit.Test
 class DeviceViewModelTest {
     @get:Rule val main = MainDispatcherRule()
 
-    private val peripheral = SimulatedPeripheral()
+    private var peripheral = SimulatedPeripheral(otaVerifier = TRUSTED_FIRST_BYTE)
+    private val repository = FakeRecordingRepository()
+    private var now = 10_000L
 
     private fun viewModel() = DeviceViewModel(
         SavedStateHandle(mapOf("address" to peripheral.address, "name" to peripheral.name)),
         GattClientFactory { peripheral.newClient() },
+        repository,
+        { now },
     )
 
     /** Runs [body] against a fresh ViewModel and always cancels its scope, so a failed assertion cannot leave the simulated peripheral streaming and hang runTest. */
@@ -67,9 +80,11 @@ class DeviceViewModelTest {
     @Test
     fun `failed LED write rolls back and logs the reason`() = vmTest(setUp = {
         peripheral.requireBonding = true
-        peripheral.acceptBonding = false
     }) { vm ->
         advanceTimeBy(2_000)
+        // The bond is lost after connecting and the user then refuses to pair again.
+        peripheral.forgetBond()
+        peripheral.acceptBonding = false
         vm.setLed(true)
         advanceTimeBy(2_000)
         assertThat(vm.state.value.ledOn).isFalse()
@@ -90,5 +105,200 @@ class DeviceViewModelTest {
         advanceTimeBy(2_000)
         runCurrent()
         assertThat(vm.state.value.connection).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
+    fun `motion samples fill the chart and drive the tilt`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        val state = vm.state.value
+        assertThat(state.hasImu).isTrue()
+        assertThat(state.motion).isNotEmpty()
+        assertThat(state.motion.size).isAtMost(DeviceViewModel.MOTION_SIZE)
+        assertThat(state.tilt).isNotEqualTo(Tilt.Level)
+    }
+
+    @Test
+    fun `a board without sensors degrades to no motion and no touch`() = vmTest(setUp = {
+        peripheral = SimulatedPeripheral(hasBoardSensors = false)
+    }) { vm ->
+        advanceTimeBy(5_000)
+        val state = vm.state.value
+        assertThat(state.connection).isInstanceOf(ConnectionState.Ready::class.java)
+        assertThat(state.latest).isNotNull()
+        assertThat(state.hasImu).isFalse()
+        assertThat(state.hasTouch).isFalse()
+        assertThat(state.motion).isEmpty()
+        assertThat(state.tilt).isEqualTo(Tilt.Level)
+    }
+
+    @Test
+    fun `touch events from the board are listed and logged`() = vmTest { vm ->
+        advanceTimeBy(2_000)
+        peripheral.touch(10, 20)
+        peripheral.touch(30, 40, TouchKind.LongPress)
+        advanceTimeBy(500)
+        val touches = vm.state.value.touches
+        assertThat(touches.map { it.x to it.y }).containsExactly(10 to 20, 30 to 40).inOrder()
+        assertThat(touches.last().kind).isEqualTo(TouchKind.LongPress)
+        assertThat(vm.state.value.log).contains("Touch LongPress at 30,40")
+    }
+
+    @Test
+    fun `message reaches the board and reports success`() = vmTest { vm ->
+        advanceTimeBy(2_000)
+        vm.sendMessage("  Hello  ")
+        assertThat(vm.state.value.message).isEqualTo(MessageStatus.Sending)
+        advanceTimeBy(1_000)
+        assertThat(peripheral.messages).containsExactly("Hello")
+        assertThat(vm.state.value.message).isEqualTo(MessageStatus.Sent("Hello"))
+    }
+
+    @Test
+    fun `failed message write shows the reason`() = vmTest(setUp = {
+        peripheral.requireBonding = true
+        peripheral.acceptBonding = false
+    }) { vm ->
+        advanceTimeBy(2_000)
+        vm.sendMessage("Hello")
+        advanceTimeBy(2_000)
+        assertThat(vm.state.value.message).isInstanceOf(MessageStatus.Failed::class.java)
+        assertThat(peripheral.messages).isEmpty()
+    }
+
+    @Test
+    fun `recording stores a session and closing it sets the end time`() = vmTest { vm ->
+        advanceTimeBy(2_000)
+        vm.toggleRecording()
+        runCurrent()
+        assertThat(vm.state.value.recording).isInstanceOf(RecordingState.Recording::class.java)
+        now = 15_000
+        advanceTimeBy(3_000)
+        vm.toggleRecording()
+        runCurrent()
+        assertThat(vm.state.value.recording).isEqualTo(RecordingState.Idle)
+        val session = repository.sessions().first().single()
+        assertThat(session.endedAtMillis).isEqualTo(15_000)
+        assertThat(session.deviceAddress).isEqualTo(peripheral.address)
+        assertThat(session.telemetryCount).isGreaterThan(0)
+        assertThat(session.motionCount).isGreaterThan(0)
+        assertThat(vm.state.value.log).contains("Recording saved")
+    }
+
+    @Test
+    fun `stopRecording closes an open session and is harmless when idle`() = vmTest { vm ->
+        advanceTimeBy(1_000)
+        vm.stopRecording()
+        runCurrent()
+        assertThat(repository.sessions().first()).isEmpty()
+        vm.toggleRecording()
+        runCurrent()
+        vm.stopRecording()
+        runCurrent()
+        assertThat(repository.sessions().first().single().endedAtMillis).isNotNull()
+    }
+
+    /** A `.signed.bin` package; the stand-in verifier trusts signatures that start with 1, so [trusted] picks the key. */
+    private fun image(size: Int = 20_000, revision: String = "ble-lab 1.3.0", signed: Boolean = true, trusted: Boolean = true, versionCode: Long = 10_300): ByteArray {
+        val bytes = ByteArray(size) { (it % 251).toByte() }
+        bytes[0] = 0xE9.toByte()
+        revision.toByteArray().copyInto(bytes, 100)
+        if (!signed) return bytes
+        val signature = ByteArray(64).also { it[0] = if (trusted) 1 else 2 }
+        return "BLFW".toByteArray() + ByteArray(4) { (versionCode shr (8 * it)).toByte() } + signature + bytes
+    }
+
+    @Test
+    fun `a file that is not a firmware image is rejected`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(ByteArray(500))
+        assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Failed::class.java)
+        vm.pickFirmware(null)
+        assertThat((vm.state.value.firmware as FirmwareUpdate.Failed).reason).contains("could not be read")
+    }
+
+    @Test
+    fun `a picked image shows its size and version before anything is sent`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        assertThat(vm.state.value.canUpdateFirmware).isTrue()
+        vm.pickFirmware(image())
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(20_000, "ble-lab 1.3.0", signed = true))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `update streams the image, the board restarts and the new version is confirmed`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image())
+        vm.startFirmwareUpdate()
+        runCurrent()
+        assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Running::class.java)
+        advanceTimeBy(30_000)
+        assertThat(peripheral.otaCompleted).isEqualTo(1)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Finished("ble-lab 1.3.0"))
+        assertThat(vm.state.value.connection).isInstanceOf(ConnectionState.Ready::class.java)
+    }
+
+    @Test
+    fun `cancelling mid transfer leaves the board untouched and the file ready to retry`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image(size = 400_000))
+        vm.startFirmwareUpdate()
+        advanceTimeBy(300)
+        assertThat(vm.state.value.firmware).isInstanceOf(FirmwareUpdate.Running::class.java)
+        vm.cancelFirmwareUpdate()
+        advanceTimeBy(1_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(400_000, "ble-lab 1.3.0", signed = true))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `a board that came back on another version is reported as rolled back`() = vmTest(setUp = { peripheral.otaResultRevision = "ble-lab 1.1.0" }) { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image())
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        val failed = vm.state.value.firmware as FirmwareUpdate.Failed
+        assertThat(failed.reason).contains("rolled back")
+    }
+
+    @Test
+    fun `a board without the update service cannot be updated`() = vmTest(setUp = { peripheral = SimulatedPeripheral(supportsOta = false) }) { vm ->
+        advanceTimeBy(5_000)
+        assertThat(vm.state.value.canUpdateFirmware).isFalse()
+    }
+
+    @Test
+    fun `a raw unsigned bin is shown as unsigned and the board refuses it`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image(signed = false))
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Picked(20_000, "ble-lab 1.3.0", signed = false))
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Failed(OtaError.BadSignature.message))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `an image signed with the wrong key is refused with a clear reason`() = vmTest { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image(trusted = false))
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Failed(OtaError.BadSignature.message))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    @Test
+    fun `a downgrade is refused with a clear reason`() = vmTest(setUp = { peripheral.firmwareRevision = "ble-lab 1.4.0" }) { vm ->
+        advanceTimeBy(5_000)
+        vm.pickFirmware(image())
+        vm.startFirmwareUpdate()
+        advanceTimeBy(30_000)
+        assertThat(vm.state.value.firmware).isEqualTo(FirmwareUpdate.Failed(OtaError.Downgrade.message))
+        assertThat(peripheral.otaCompleted).isEqualTo(0)
+    }
+
+    private companion object {
+        val TRUSTED_FIRST_BYTE = OtaSignatureVerifier { _, _, _, signature -> signature[0] == 1.toByte() }
     }
 }

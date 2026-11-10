@@ -1,25 +1,34 @@
 package com.codebyramiz.blelab.ui.device
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,12 +38,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -52,28 +69,70 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codebyramiz.blelab.R
 import com.codebyramiz.blelab.ble.model.ConnectionState
 import com.codebyramiz.blelab.ble.model.DeviceInfo
+import com.codebyramiz.blelab.ble.model.TouchKind
+import com.codebyramiz.blelab.ble.protocol.MessageCodec
+import com.codebyramiz.blelab.recording.RecordingState
+import com.codebyramiz.blelab.ui.components.AxesChart
+import com.codebyramiz.blelab.ui.components.ChartScale
 import com.codebyramiz.blelab.ui.components.LiveChart
 import com.codebyramiz.blelab.ui.components.PipelineStepper
+import com.codebyramiz.blelab.ui.components.SectionCard
+import com.codebyramiz.blelab.ui.components.SectionTitle
 import com.codebyramiz.blelab.ui.components.StatusPill
+import com.codebyramiz.blelab.ui.components.TiltVisual
+import com.codebyramiz.blelab.ui.components.YAxisChart
+import com.codebyramiz.blelab.ui.components.formatAxis
 import com.codebyramiz.blelab.ui.theme.LocalSignalColors
 import com.codebyramiz.blelab.ui.theme.MonoStyle
+
+enum class DeviceTab(val label: Int, val icon: Int) {
+    Live(R.string.tab_live, R.drawable.ic_sensors),
+    Motion(R.string.tab_motion, R.drawable.ic_motion),
+    Board(R.string.tab_control, R.drawable.ic_touch),
+}
 
 @Composable
 fun DeviceRoute(onBack: () -> Unit, viewModel: DeviceViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    DeviceScreen(state = state, onBack = onBack, onRetry = viewModel::retry, onLedChange = viewModel::setLed)
+    val recording = state.recording is RecordingState.Recording
+    // Leaving the screen closes an open recording so the session gets its end time.
+    val leave = {
+        viewModel.stopRecording()
+        onBack()
+    }
+    BackHandler(enabled = recording, onBack = leave)
+    DeviceScreen(
+        state = state,
+        onBack = leave,
+        onRetry = viewModel::retry,
+        onLedChange = viewModel::setLed,
+        onToggleRecording = viewModel::toggleRecording,
+        onSendMessage = viewModel::sendMessage,
+        firmware = FirmwareActions(viewModel::pickFirmware, viewModel::startFirmwareUpdate, viewModel::cancelFirmwareUpdate, viewModel::dismissFirmware),
+    )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DeviceScreen(
     state: DeviceUiState,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onLedChange: (Boolean) -> Unit,
+    onToggleRecording: () -> Unit,
+    onSendMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
+    firmware: FirmwareActions = FirmwareActions(),
+    initialTab: DeviceTab = DeviceTab.Live,
 ) {
     val connection = state.connection
+    var tab by rememberSaveable { mutableStateOf(initialTab) }
+    val scroll = rememberScrollState()
+    // The message field is the last card of the Board tab: when the keyboard opens, scroll it and
+    // the Send button into the space the keyboard left.
+    val keyboardOpen = WindowInsets.isImeVisible
+    // maxValue is a key because the area only gets its final height after the keyboard has resized it.
+    LaunchedEffect(keyboardOpen, tab, scroll.maxValue) { if (keyboardOpen && tab == DeviceTab.Board) scroll.animateScrollTo(scroll.maxValue) }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -91,40 +150,195 @@ fun DeviceScreen(
             )
         },
     ) { padding ->
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-            PipelineStepper(connection)
-            AnimatedVisibility(connection is ConnectionState.Reconnecting || connection is ConnectionState.Failed, enter = expandVertically(), exit = shrinkVertically()) {
-                ProblemCard(connection, onRetry)
+        // padding() alone does not mark the bars as used, so imePadding would add the navigation bar
+        // a second time (an empty strip above the keyboard). consumeWindowInsets fixes that.
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+            PrimaryTabRow(selectedTabIndex = tab.ordinal) {
+                DeviceTab.entries.forEach { entry ->
+                    Tab(
+                        selected = entry == tab,
+                        onClick = { tab = entry },
+                        text = { Text(stringResource(entry.label)) },
+                        icon = { Icon(painterResource(entry.icon), contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        modifier = Modifier.testTag("tab-${entry.name}"),
+                    )
+                }
             }
+            BannerHost(connection, onRetry, Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
             AnimatedVisibility(connection is ConnectionState.Connecting || connection is ConnectionState.Discovering || connection is ConnectionState.Bonding) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            TelemetryCard(state)
-            LedCard(state, enabled = connection is ConnectionState.Ready, onLedChange)
-            InfoCard(state.address, (connection as? ConnectionState.Ready)?.info, (connection as? ConnectionState.Ready)?.mtu)
-            LogCard(state.log)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                when (tab) {
+                    DeviceTab.Live -> LiveTab(state, onToggleRecording)
+                    DeviceTab.Motion -> MotionTab(state)
+                    DeviceTab.Board -> BoardTab(state, onLedChange, onSendMessage, firmware)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun SectionCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        modifier = modifier.fillMaxWidth(),
-    ) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() } }
+private fun LiveTab(state: DeviceUiState, onToggleRecording: () -> Unit) {
+    val ready = state.connection as? ConnectionState.Ready
+    PipelineStepper(state.connection)
+    RecordCard(state.recording, enabled = ready != null || state.recording is RecordingState.Recording, onToggle = onToggleRecording)
+    TelemetryCard(state)
+    InfoCard(state.address, ready?.info, ready?.mtu)
+    LogCard(state.log)
 }
 
 @Composable
-private fun SectionTitle(icon: Int, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(icon), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun RecordCard(recording: RecordingState, enabled: Boolean, onToggle: () -> Unit) {
+    val active = recording as? RecordingState.Recording
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (active == null) stringResource(R.string.record_start) else pluralStringResource(R.plurals.record_progress, active.telemetryCount + active.motionCount, active.telemetryCount + active.motionCount),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (active == null) {
+                    Text(stringResource(R.string.record_idle_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            if (active == null) {
+                FilledTonalButton(onClick = onToggle, enabled = enabled, modifier = Modifier.testTag("recordButton")) {
+                    Icon(painterResource(R.drawable.ic_record), contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.record_start))
+                }
+            } else {
+                Button(onClick = onToggle, modifier = Modifier.testTag("recordButton")) {
+                    Icon(painterResource(R.drawable.ic_stop), contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.record_stop))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MotionTab(state: DeviceUiState) {
+    if (state.latest != null && !state.hasImu) {
+        SectionCard(Modifier.testTag("motionUnavailable")) {
+            SectionTitle(R.drawable.ic_motion, stringResource(R.string.motion_unavailable_title))
+            Text(stringResource(R.string.motion_unavailable_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    SectionCard(Modifier.testTag("tiltCard")) {
+        SectionTitle(R.drawable.ic_motion, stringResource(R.string.motion_title_tilt))
+        if (state.motion.isEmpty()) {
+            Text(stringResource(R.string.motion_waiting), style = MaterialTheme.typography.bodyMedium)
+        }
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TiltVisual(state.tilt)
+            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Text(stringResource(R.string.motion_roll, state.tilt.rollDegrees), style = MonoStyle)
+                Text(stringResource(R.string.motion_pitch, state.tilt.pitchDegrees), style = MonoStyle)
+            }
+        }
+    }
+    AxesCard(R.string.motion_title_accel, state.motion.map { listOf(it.ax, it.ay, it.az) }, ACCEL_MIN_EXTENT, decimals = 1, "accelCard")
+    AxesCard(R.string.motion_title_gyro, state.motion.map { listOf(it.gx, it.gy, it.gz) }, GYRO_MIN_EXTENT, decimals = 0, "gyroCard")
+}
+
+@Composable
+private fun AxesCard(title: Int, samples: List<List<Float>>, minExtent: Float, decimals: Int, tag: String) {
+    SectionCard(Modifier.testTag(tag)) {
+        SectionTitle(R.drawable.ic_motion, stringResource(title))
+        AxesChart(
+            series = List(AXES) { axis -> samples.map { it[axis] } },
+            capacity = DeviceViewModel.MOTION_SIZE,
+            minExtent = minExtent,
+            decimals = decimals,
+        )
+    }
+}
+
+private const val AXES = 3
+private const val ACCEL_MIN_EXTENT = 1f
+private const val GYRO_MIN_EXTENT = 50f
+
+@Composable
+private fun BoardTab(state: DeviceUiState, onLedChange: (Boolean) -> Unit, onSendMessage: (String) -> Unit, firmware: FirmwareActions) {
+    val ready = state.connection is ConnectionState.Ready
+    LedCard(state, enabled = ready, onLedChange)
+    TouchCard(state)
+    FirmwareCard(state, firmware)
+    MessageCard(state.message, enabled = ready, onSend = onSendMessage)
+}
+
+@Composable
+private fun TouchCard(state: DeviceUiState) {
+    SectionCard(Modifier.testTag("touchCard")) {
+        SectionTitle(R.drawable.ic_touch, stringResource(R.string.touch_title))
+        if (state.latest != null && !state.hasTouch) {
+            Text(stringResource(R.string.touch_unavailable), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@SectionCard
+        }
+        if (state.touches.isEmpty()) {
+            Text(stringResource(R.string.touch_hint), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        state.touches.takeLast(TOUCH_ROWS).reversed().forEachIndexed { index, touch ->
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                val kind = stringResource(if (touch.kind == TouchKind.Tap) R.string.touch_tap else R.string.touch_long_press)
+                Text(if (touch.injected) "$kind (${stringResource(R.string.touch_injected)})" else kind, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.touch_position, touch.x, touch.y), style = MonoStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private const val TOUCH_ROWS = 5
+
+@Composable
+private fun MessageCard(status: MessageStatus, enabled: Boolean, onSend: (String) -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    val bytes = MessageCodec.byteLength(text)
+    val tooLong = bytes > MessageCodec.MAX_BYTES
+    SectionCard(Modifier.testTag("messageCard")) {
+        SectionTitle(R.drawable.ic_send, stringResource(R.string.message_title))
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text(stringResource(R.string.message_label)) },
+            singleLine = true,
+            isError = tooLong,
+            supportingText = { Text(stringResource(R.string.message_counter, bytes, MessageCodec.MAX_BYTES)) },
+            modifier = Modifier.fillMaxWidth().testTag("messageField"),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (status) {
+                    MessageStatus.None -> ""
+                    MessageStatus.Sending -> stringResource(R.string.message_sending)
+                    is MessageStatus.Sent -> stringResource(R.string.message_sent, status.text)
+                    is MessageStatus.Failed -> stringResource(R.string.message_failed, status.reason)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status is MessageStatus.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f).testTag("messageStatus"),
+            )
+            Spacer(Modifier.width(12.dp))
+            Button(
+                onClick = { onSend(text) },
+                enabled = enabled && bytes > 0 && !tooLong && status != MessageStatus.Sending,
+                modifier = Modifier.testTag("sendButton"),
+            ) {
+                Icon(painterResource(R.drawable.ic_send), contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.message_send))
+            }
+        }
     }
 }
 
@@ -146,7 +360,10 @@ private fun TelemetryCard(state: DeviceUiState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        LiveChart(state.samples, Modifier.fillMaxWidth().height(160.dp), capacity = DeviceViewModel.CHART_SIZE)
+        val range = ChartScale.fit(state.samples)
+        YAxisChart(top = formatAxis(range.max, 1), bottom = formatAxis(range.min, 1), modifier = Modifier.fillMaxWidth().height(160.dp)) {
+            LiveChart(state.samples, Modifier.fillMaxSize(), capacity = DeviceViewModel.CHART_SIZE)
+        }
     }
 }
 
@@ -195,23 +412,49 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
+private enum class BannerKind { Problem, Progress }
+
+private data class Banner(val text: String, val kind: BannerKind, val retryable: Boolean = false)
+
 @Composable
-private fun ProblemCard(connection: ConnectionState, onRetry: () -> Unit) {
-    val (title, failed) = when (connection) {
-        is ConnectionState.Reconnecting -> connection.cause.message to false
-        is ConnectionState.Failed -> connection.error.message to true
-        else -> "" to false
+private fun bannerFor(connection: ConnectionState): Banner? = when (connection) {
+    is ConnectionState.Reconnecting -> Banner(stringResource(R.string.banner_reconnecting, connection.cause.message), BannerKind.Problem)
+    is ConnectionState.Failed -> Banner(stringResource(R.string.banner_failed, connection.error.message), BannerKind.Problem, retryable = true)
+    is ConnectionState.Bonding -> Banner(stringResource(R.string.banner_pairing), BannerKind.Progress)
+    else -> null
+}
+
+/**
+ * Connection problems and the pairing prompt. The last banner is kept while the card animates
+ * out, otherwise the exit animation recomposes it with no state to describe and shows a bare icon.
+ */
+@Composable
+private fun BannerHost(connection: ConnectionState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val current = bannerFor(connection)
+    var last by remember { mutableStateOf<Banner?>(null) }
+    LaunchedEffect(current) { if (current != null) last = current }
+    AnimatedVisibility(current != null, enter = expandVertically(), exit = shrinkVertically()) {
+        (current ?: last)?.let { BannerCard(it, onRetry, modifier) }
     }
+}
+
+@Composable
+private fun BannerCard(banner: Banner, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val problem = banner.kind == BannerKind.Problem
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
-        modifier = Modifier.fillMaxWidth().testTag("problemCard"),
+        colors = if (problem) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+        } else {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+        },
+        modifier = modifier.fillMaxWidth().testTag(if (problem) "problemCard" else "pairingCard"),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
-            Icon(painterResource(R.drawable.ic_link_off), contentDescription = null)
+            Icon(painterResource(if (problem) R.drawable.ic_link_off else R.drawable.ic_lock), contentDescription = null)
             Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.reconnect_cause, title), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            if (failed) {
+            Text(banner.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).testTag("bannerText"))
+            if (banner.retryable) {
                 FilledTonalButton(onClick = onRetry, modifier = Modifier.testTag("retryButton")) {
                     Icon(painterResource(R.drawable.ic_refresh), contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))

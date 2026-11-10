@@ -25,6 +25,7 @@ import com.codebyramiz.blelab.ble.protocol.GattProfile
 import com.codebyramiz.blelab.ble.protocol.GattStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -61,6 +62,12 @@ class AndroidGattClient(private val context: Context, private val address: Strin
 
     @Volatile private var pending: CompletableDeferred<Any>? = null
 
+    /**
+     * Characteristic of the write-with-response in flight. A write-without-response may still
+     * report completion late; matching on the characteristic keeps that from completing the next operation.
+     */
+    @Volatile private var pendingWrite: UUID? = null
+
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             val connecting = connectResult
@@ -89,7 +96,9 @@ class AndroidGattClient(private val context: Context, private val address: Strin
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) finish(status) { characteristic.value ?: ByteArray(0) }
         }
 
-        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) = finish(status) { Unit }
+        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (characteristic.uuid == pendingWrite) finish(status) { Unit }
+        }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) = finish(status) { Unit }
 
@@ -134,6 +143,12 @@ class AndroidGattClient(private val context: Context, private val address: Strin
         gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
     }
 
+    override val isBonded: Boolean
+        get() {
+            BlePermissionCheck.requireConnect(context)
+            return device.bondState == BluetoothDevice.BOND_BONDED
+        }
+
     override suspend fun requestMtu(mtu: Int): Int = operation { it.requestMtu(mtu) } as Int
 
     @Suppress("UNCHECKED_CAST")
@@ -144,7 +159,33 @@ class AndroidGattClient(private val context: Context, private val address: Strin
     } as ByteArray
 
     override suspend fun write(service: UUID, characteristic: UUID, value: ByteArray) {
-        operation { gatt -> writeCharacteristic(gatt, gatt.characteristic(service, characteristic), value) }
+        try {
+            operation { gatt ->
+                val target = gatt.characteristic(service, characteristic)
+                pendingWrite = characteristic
+                writeCharacteristic(gatt, target, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == WRITE_ACCEPTED
+            }
+        } finally {
+            pendingWrite = null
+        }
+    }
+
+    override suspend fun writeWithoutResponse(service: UUID, characteristic: UUID, value: ByteArray) {
+        operationLock.withLock {
+            BlePermissionCheck.requireConnect(context)
+            val current = gatt ?: throw BleException(BleError.NotConnected)
+            val target = current.characteristic(service, characteristic)
+            try {
+                // The stack accepts one write at a time and answers BUSY until the previous one has left; wait it out.
+                withTimeout(OPERATION_TIMEOUT_MILLIS) {
+                    while (writeCharacteristic(current, target, value, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == WRITE_BUSY) {
+                        delay(WRITE_BUSY_RETRY_MILLIS)
+                    }
+                }
+            } catch (e: TimeoutCancellationException) {
+                throw BleException(BleError.Gatt(GattStatus.OPERATION_TIMEOUT))
+            }
+        }
     }
 
     override suspend fun enableNotifications(service: UUID, characteristic: UUID) {
@@ -160,26 +201,19 @@ class AndroidGattClient(private val context: Context, private val address: Strin
         BlePermissionCheck.requireConnect(context)
         val target = device
         if (target.bondState == BluetoothDevice.BOND_BONDED) return
-        val bonded = CompletableDeferred<Boolean>()
+        val changes = MutableSharedFlow<Int>(extraBufferCapacity = 8)
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val changed = IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
                 if (changed?.address != address) return
-                when (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)) {
-                    BluetoothDevice.BOND_BONDED -> bonded.complete(true)
-                    BluetoothDevice.BOND_NONE -> bonded.complete(false)
-                }
+                changes.tryEmit(intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR))
             }
         }
-        ContextCompat.registerReceiver(context, receiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        // EXPORTED: the broadcast is sent by the Bluetooth process, which a NOT_EXPORTED receiver never hears.
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED)
         try {
             if (!target.createBond()) throw BleException(BleError.BondingFailed)
-            val ok = try {
-                withTimeout(BOND_TIMEOUT_MILLIS) { bonded.await() }
-            } catch (e: TimeoutCancellationException) {
-                false
-            }
-            if (!ok) throw BleException(BleError.BondingFailed)
+            if (!awaitBonded(changes, { target.bondState }, BOND_TIMEOUT_MILLIS)) throw BleException(BleError.BondingFailed)
         } finally {
             context.unregisterReceiver(receiver)
         }
@@ -213,16 +247,14 @@ class AndroidGattClient(private val context: Context, private val address: Strin
 
     private fun BluetoothGatt.characteristic(service: UUID, characteristic: UUID): BluetoothGattCharacteristic = getService(service)?.getCharacteristic(characteristic) ?: throw BleException(BleError.ServiceNotFound)
 
+    /** Returns [WRITE_ACCEPTED], [WRITE_BUSY] or another [BluetoothStatusCodes] value; the pre-33 API only says yes or no, and "no" is almost always busy. */
     @Suppress("DEPRECATION")
-    private fun writeCharacteristic(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
-        val type = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeCharacteristic(characteristic, value, type) == BluetoothStatusCodes.SUCCESS
-        } else {
-            characteristic.writeType = type
-            characteristic.value = value
-            gatt.writeCharacteristic(characteristic)
-        }
+    private fun writeCharacteristic(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, type: Int): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        gatt.writeCharacteristic(characteristic, value, type)
+    } else {
+        characteristic.writeType = type
+        characteristic.value = value
+        if (gatt.writeCharacteristic(characteristic)) WRITE_ACCEPTED else WRITE_BUSY
     }
 
     @Suppress("DEPRECATION")
@@ -237,5 +269,10 @@ class AndroidGattClient(private val context: Context, private val address: Strin
         const val CONNECT_TIMEOUT_MILLIS = 15_000L
         const val OPERATION_TIMEOUT_MILLIS = 10_000L
         const val BOND_TIMEOUT_MILLIS = 30_000L
+        const val WRITE_BUSY_RETRY_MILLIS = 5L
+
+        /** `BluetoothStatusCodes.SUCCESS` and `ERROR_GATT_WRITE_REQUEST_BUSY`, which are API 33 constants. */
+        const val WRITE_ACCEPTED = 0
+        const val WRITE_BUSY = 201
     }
 }

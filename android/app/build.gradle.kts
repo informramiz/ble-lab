@@ -80,8 +80,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.sqlite.framework)
     implementation(libs.hilt.android)
     implementation(libs.kotlinx.serialization.json)
+    ksp(libs.androidx.room.compiler)
     ksp(libs.hilt.compiler)
 
     debugImplementation(libs.androidx.compose.ui.tooling)

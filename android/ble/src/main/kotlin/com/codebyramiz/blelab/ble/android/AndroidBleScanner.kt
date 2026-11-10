@@ -1,7 +1,10 @@
 package com.codebyramiz.blelab.ble.android
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
@@ -14,6 +17,7 @@ import com.codebyramiz.blelab.ble.model.BleException
 import com.codebyramiz.blelab.ble.model.ScanUpdate
 import com.codebyramiz.blelab.ble.model.ScannedDevice
 import com.codebyramiz.blelab.ble.protocol.GattProfile
+import com.codebyramiz.blelab.ble.scan.KnownDevices
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -56,7 +60,22 @@ class AndroidBleScanner(private val context: Context) : BleScanner {
         }
         val filters = serviceFilter?.let { listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(it)).build()) }.orEmpty()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        // A bonded board that Android keeps linked stops advertising; list it from the system.
+        knownDevices(adapter, bleLabOnly = serviceFilter != null).forEach { trySend(it) }
         scanner.startScan(filters, settings, callback)
         awaitClose { runCatching { scanner.stopScan(callback) } }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun knownDevices(adapter: BluetoothAdapter, bleLabOnly: Boolean): List<ScanUpdate.Found> {
+        // These lists need BLUETOOTH_CONNECT on Android 12+; without it the scan still works.
+        if (runCatching { BlePermissionCheck.requireConnect(context) }.isFailure) return emptyList()
+        val manager = context.getSystemService(BluetoothManager::class.java)
+        val open = manager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
+        val now = System.currentTimeMillis()
+        return (open + adapter.bondedDevices.orEmpty())
+            .filter { it.type == BluetoothDevice.DEVICE_TYPE_LE || it.type == BluetoothDevice.DEVICE_TYPE_DUAL }
+            .distinctBy { it.address }
+            .mapNotNull { KnownDevices.toUpdate(it.address, it.name, bleLabOnly, now) }
     }
 }

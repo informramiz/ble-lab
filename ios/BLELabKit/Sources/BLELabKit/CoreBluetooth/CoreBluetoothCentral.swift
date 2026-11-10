@@ -198,6 +198,15 @@ final class CoreBluetoothLink: NSObject, GattLink, CBPeripheralDelegate, @unchec
     private var reads: [CBUUID: CheckedContinuation<Data, any Error>] = [:]
     private var writes: [CBUUID: CheckedContinuation<Void, any Error>] = [:]
     private var notifies: [CBUUID: CheckedContinuation<Void, any Error>] = [:]
+    /// Queue-confined; holds writes without response until `canSendWriteWithoutResponse` is true.
+    private lazy var pacer = WriteWithoutResponsePacer(
+        canSend: { [peripheral] in peripheral.canSendWriteWithoutResponse },
+        send: { [peripheral, weak self] data in
+            guard let target = self?.pacedTarget else { return }
+            peripheral.writeValue(data, for: target, type: .withoutResponse)
+        }
+    )
+    private var pacedTarget: CBCharacteristic?
 
     init(peripheral: CBPeripheral, queue: DispatchQueue, cancel: @escaping @Sendable () -> Void) {
         self.peripheral = peripheral
@@ -212,10 +221,17 @@ final class CoreBluetoothLink: NSObject, GattLink, CBPeripheralDelegate, @unchec
         get async { await onQueue { self.peripheral.maximumWriteValueLength(for: .withResponse) } }
     }
 
+    var maximumWriteWithoutResponseLength: Int {
+        get async { await onQueue { self.peripheral.maximumWriteValueLength(for: .withoutResponse) } }
+    }
+
     func discoverServices() async throws(BLEError) -> Set<AttributeID> {
         try await run { (c: CheckedContinuation<Set<AttributeID>, any Error>) in
             self.discovery = c
-            self.peripheral.discoverServices([CBUUID(nsuuid: GattProfile.labService), Self.uuid(.sig(GattProfile.deviceInfoService))])
+            self.peripheral.discoverServices([
+                CBUUID(nsuuid: GattProfile.labService), Self.uuid(.sig(GattProfile.deviceInfoService)),
+                CBUUID(nsuuid: GattProfile.otaService),
+            ])
         }
     }
 
@@ -232,6 +248,22 @@ final class CoreBluetoothLink: NSObject, GattLink, CBPeripheralDelegate, @unchec
             guard let target = self.find(characteristic, in: service) else { return c.resume(throwing: BLEError.serviceNotFound) }
             self.writes[target.uuid] = c
             self.peripheral.writeValue(value, for: target, type: .withResponse)
+        }
+    }
+
+    /// Apple: `writeValue(_:for:type: .withoutResponse)` drops data when the queue is full, so every write
+    /// goes through the pacer, which checks `canSendWriteWithoutResponse` and waits for
+    /// `peripheralIsReady(toSendWriteWithoutResponse:)`.
+    func writeWithoutResponse(_ value: Data, to characteristic: AttributeID, in service: AttributeID) async throws(BLEError) {
+        try await run { (c: CheckedContinuation<Void, any Error>) in
+            guard let target = self.find(characteristic, in: service) else { return c.resume(throwing: BLEError.serviceNotFound) }
+            self.pacedTarget = target
+            self.pacer.submit(value) { result in
+                switch result {
+                case .success: c.resume()
+                case .failure(let error): c.resume(throwing: error)
+                }
+            }
         }
     }
 
@@ -252,6 +284,7 @@ final class CoreBluetoothLink: NSObject, GattLink, CBPeripheralDelegate, @unchec
         reads.values.forEach { $0.resume(throwing: error) }; reads = [:]
         writes.values.forEach { $0.resume(throwing: error) }; writes = [:]
         notifies.values.forEach { $0.resume(throwing: error) }; notifies = [:]
+        pacer.fail(error)
         eventContinuation.yield(.disconnected(error))
         eventContinuation.finish()
     }
@@ -282,6 +315,10 @@ final class CoreBluetoothLink: NSObject, GattLink, CBPeripheralDelegate, @unchec
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: (any Error)?) {
         guard let continuation = writes.removeValue(forKey: characteristic.uuid) else { return }
         if let error { continuation.resume(throwing: CoreBluetoothCentral.map(error)) } else { continuation.resume() }
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        pacer.ready()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: (any Error)?) {

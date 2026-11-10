@@ -16,6 +16,27 @@ object GattProfile {
     /** Read + write (with response, encrypted link): 1 byte, 0x00 = LED off, 0x01 = LED on. */
     val LED: UUID = UUID.fromString("b1e1ab02-5a1e-4c3a-9f5e-c0de00b1e1ab")
 
+    /** Notify (firmware 1.1.0+): batches of IMU samples, see [MotionCodec]. */
+    val MOTION: UUID = UUID.fromString("b1e1ab03-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Notify (firmware 1.1.0+): one touchscreen event per notification, see [TouchCodec]. */
+    val TOUCH: UUID = UUID.fromString("b1e1ab04-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Write with response, encrypted link (firmware 1.1.0+): UTF-8 text shown on the board's screen, see [MessageCodec]. */
+    val MESSAGE: UUID = UUID.fromString("b1e1ab05-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** OTA firmware update service (firmware 1.2.0+), see [OtaProtocol]. */
+    val OTA_SERVICE: UUID = UUID.fromString("b1e1ab10-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Write with response, encrypted link: START, ABORT and FINISH commands. */
+    val OTA_CONTROL: UUID = UUID.fromString("b1e1ab11-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Write without response, encrypted link: raw image bytes in order. */
+    val OTA_DATA: UUID = UUID.fromString("b1e1ab12-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
+    /** Read + notify: 6-byte transfer status, see [OtaProtocol.decodeStatus]. */
+    val OTA_STATUS: UUID = UUID.fromString("b1e1ab13-5a1e-4c3a-9f5e-c0de00b1e1ab")
+
     /** Bluetooth SIG Device Information service and the characteristics we read from it. */
     val DEVICE_INFO_SERVICE: UUID = sig(0x180A)
     val MANUFACTURER_NAME: UUID = sig(0x2A29)

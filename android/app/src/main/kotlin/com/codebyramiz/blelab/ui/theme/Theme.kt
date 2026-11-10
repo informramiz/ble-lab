@@ -64,12 +64,23 @@ private val DarkColors = darkColorScheme(
 
 /** Colours that carry meaning (link health) and so stay fixed under dynamic colour. */
 @Immutable
-data class SignalColors(val good: Color, val warn: Color, val bad: Color, val chart: Color, val glow: Color)
+data class SignalColors(
+    val good: Color,
+    val warn: Color,
+    val bad: Color,
+    val chart: Color,
+    val glow: Color,
+    /** One distinct, fixed colour per sensor axis (X, Y, Z) so a legend stays valid under any wallpaper. */
+    val axes: List<Color>,
+)
+
+private val AxesLight = listOf(Color(0xFFD9363E), Color(0xFF1E9E63), Color(0xFF2F6FEB))
+private val AxesDark = listOf(Color(0xFFFF7A80), Color(0xFF4ADE9A), Color(0xFF6EA8FF))
 
 // Theme-scoped tokens, the same pattern MaterialTheme uses for its colour scheme.
 @Suppress("ComposeCompositionLocalUsage")
 val LocalSignalColors = staticCompositionLocalOf {
-    SignalColors(Color(0xFF1E9E63), Color(0xFFE09B12), Color(0xFFD9363E), Signal, Color(0xFFFFD54F))
+    SignalColors(Color(0xFF1E9E63), Color(0xFFE09B12), Color(0xFFD9363E), Signal, Color(0xFFFFD54F), AxesLight)
 }
 
 private val Mono = FontFamily.Monospace
@@ -102,7 +113,7 @@ fun BleLabTheme(
         else -> LightColors
     }
     val signal = if (darkTheme) {
-        SignalColors(Color(0xFF4ADE9A), Color(0xFFFFC857), Color(0xFFFF6B6B), SignalLight, Color(0xFFFFE082))
+        SignalColors(Color(0xFF4ADE9A), Color(0xFFFFC857), Color(0xFFFF6B6B), SignalLight, Color(0xFFFFE082), AxesDark)
     } else {
         LocalSignalColors.current
     }

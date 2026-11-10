@@ -11,11 +11,13 @@ import java.nio.ByteOrder
  * |--------|--------|-------------------------------|
  * | 0      | uint32 | sequence                      |
  * | 4      | int16  | value x 100 (centi-units)     |
- * | 6      | uint8  | flags, bit 0 = LED on         |
+ * | 6      | uint8  | flags, bit 0 = LED on, bit 1 = has IMU, bit 2 = has touchscreen |
  */
 object TelemetryCodec {
     const val SIZE = 7
     private const val FLAG_LED = 0x01
+    private const val FLAG_IMU = 0x02
+    private const val FLAG_TOUCH = 0x04
 
     fun decode(bytes: ByteArray): Telemetry {
         require(bytes.size >= SIZE) { "Telemetry payload must be at least $SIZE bytes, was ${bytes.size}" }
@@ -23,14 +25,26 @@ object TelemetryCodec {
         val sequence = buffer.int.toLong() and 0xFFFF_FFFFL
         val centi = buffer.short
         val flags = buffer.get().toInt()
-        return Telemetry(sequence = sequence, value = centi / 100f, ledOn = flags and FLAG_LED != 0)
+        return Telemetry(
+            sequence = sequence,
+            value = centi / 100f,
+            ledOn = flags and FLAG_LED != 0,
+            hasImu = flags and FLAG_IMU != 0,
+            hasTouch = flags and FLAG_TOUCH != 0,
+        )
     }
 
     fun encode(telemetry: Telemetry): ByteArray = ByteBuffer.allocate(SIZE)
         .order(ByteOrder.LITTLE_ENDIAN)
         .putInt(telemetry.sequence.toInt())
         .putShort(Math.round(telemetry.value * 100).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
-        .put(if (telemetry.ledOn) FLAG_LED.toByte() else 0)
+        .put(
+            (
+                (if (telemetry.ledOn) FLAG_LED else 0) or
+                    (if (telemetry.hasImu) FLAG_IMU else 0) or
+                    (if (telemetry.hasTouch) FLAG_TOUCH else 0)
+                ).toByte(),
+        )
         .array()
 
     fun encodeLed(on: Boolean): ByteArray = byteArrayOf(if (on) 1 else 0)

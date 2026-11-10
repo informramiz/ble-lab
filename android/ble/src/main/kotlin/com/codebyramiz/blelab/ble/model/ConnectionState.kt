@@ -12,7 +12,8 @@ sealed interface ConnectionState {
     /** The peripheral asked for an encrypted link; system pairing is in progress. */
     data class Bonding(val address: String) : ConnectionState
 
-    data class Ready(val address: String, val info: DeviceInfo, val mtu: Int) : ConnectionState
+    /** [otaSupported]: the board exposes the OTA update service (firmware 1.2.0+). */
+    data class Ready(val address: String, val info: DeviceInfo, val mtu: Int, val otaSupported: Boolean = false) : ConnectionState
 
     /** Waiting [delayMillis] before attempt number [attempt]. */
     data class Reconnecting(

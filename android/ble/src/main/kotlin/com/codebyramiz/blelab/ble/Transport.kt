@@ -40,6 +40,13 @@ interface GattClient {
 
     suspend fun connect()
 
+    /**
+     * True when the link is already encrypted with a stored bond, or the peripheral needs none.
+     * When false the manager pairs right after connecting, while the app is in the foreground:
+     * Android only shows a tap-to-pair notification for a pairing the peripheral starts itself.
+     */
+    val isBonded: Boolean
+
     /** Returns the MTU the peripheral agreed to. */
     suspend fun requestMtu(mtu: Int): Int
 
@@ -49,6 +56,13 @@ interface GattClient {
     suspend fun read(service: UUID, characteristic: UUID): ByteArray
 
     suspend fun write(service: UUID, characteristic: UUID, value: ByteArray)
+
+    /**
+     * Write without response: returns once the stack has accepted [value] for transmission,
+     * not when the peripheral has it. Callers must pace themselves (the OTA transfer does,
+     * with the board's status notifications).
+     */
+    suspend fun writeWithoutResponse(service: UUID, characteristic: UUID, value: ByteArray)
 
     suspend fun enableNotifications(service: UUID, characteristic: UUID)
 
