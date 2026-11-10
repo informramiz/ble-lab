@@ -443,11 +443,19 @@ void setup() {
   addOtaService();
   setLed(false);
 
+  // Advert (30 of 31 bytes): flags 3 + shortened name 9 + 128-bit service UUID 18. The short name
+  // lets Android resolve a name from the advert alone (the pairing prompt otherwise reads "null"
+  // when the OS has not yet seen the scan response). The full name is in the scan response.
+  BLEAdvertisementData advert;
+  advert.setFlags(ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
+  advert.setShortName(DEVICE_SHORT_NAME);
+  advert.setCompleteServices(BLEUUID(LAB_SERVICE_UUID));  // Lets the phones scan with a service filter.
+  BLEAdvertisementData scanResponse;
+  scanResponse.setName(DEVICE_NAME);
+  scanResponse.setPreferredParams(0x06, 0x12);  // Connection interval hints that help iOS connect quickly.
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
-  advertising->addServiceUUID(LAB_SERVICE_UUID);  // Lets the phones scan with a service filter.
-  advertising->setScanResponse(true);             // Name goes in the scan response; the 128-bit UUID fills the advert.
-  advertising->setMinPreferred(0x06);             // Connection interval hints that help iOS connect quickly.
-  advertising->setMaxPreferred(0x12);
+  advertising->setAdvertisementData(advert);
+  advertising->setScanResponseData(scanResponse);
   BLEDevice::startAdvertising();
   Serial.printf("advertising as %s (imu %s, touch %s)\n", DEVICE_NAME, hasImu ? "yes" : "no", hasTouch ? "yes" : "no");
 }

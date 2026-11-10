@@ -74,15 +74,16 @@
 #define OTA_VALIDATE_AFTER_MS 5000
 
 #define DEVICE_NAME          "ble-lab-esp32"
+#define DEVICE_SHORT_NAME    "ble-lab"  // Shortened name (AD type 0x08) in the advert itself.
 #define MANUFACTURER_NAME    "Espressif"
 #if defined(ARDUINO_M5STACK_CORES3)
 #define MODEL_NUMBER         "M5Stack CoreS3"
 #else
 #define MODEL_NUMBER         "ESP32-WROOM-32"
 #endif
-#define FIRMWARE_REVISION    "ble-lab 1.3.2"
+#define FIRMWARE_REVISION    "ble-lab 1.3.3"
 // major*10000 + minor*100 + patch; an OTA image with a lower code is refused (anti-rollback).
-#define FIRMWARE_VERSION_CODE 10302
+#define FIRMWARE_VERSION_CODE 10303
 
 #define PREFERRED_MTU        247
 #define TELEMETRY_PERIOD_MS  200
