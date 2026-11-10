@@ -81,9 +81,19 @@
 #else
 #define MODEL_NUMBER         "ESP32-WROOM-32"
 #endif
-#define FIRMWARE_REVISION    "ble-lab 1.3.7"
+// One source for the version: the revision string and the anti-rollback code derive from it.
+#define FIRMWARE_VERSION_MAJOR 1
+#define FIRMWARE_VERSION_MINOR 3
+#define FIRMWARE_VERSION_PATCH 8
+#define BLE_LAB_STR_(x) #x
+#define BLE_LAB_STR(x) BLE_LAB_STR_(x)
+#define FIRMWARE_REVISION                                                                      \
+  "ble-lab " BLE_LAB_STR(FIRMWARE_VERSION_MAJOR) "." BLE_LAB_STR(FIRMWARE_VERSION_MINOR) "." \
+      BLE_LAB_STR(FIRMWARE_VERSION_PATCH)
 // major*10000 + minor*100 + patch; an OTA image with a lower code is refused (anti-rollback).
-#define FIRMWARE_VERSION_CODE 10307
+#define FIRMWARE_VERSION_CODE \
+  (FIRMWARE_VERSION_MAJOR * 10000 + FIRMWARE_VERSION_MINOR * 100 + FIRMWARE_VERSION_PATCH)
+static_assert(FIRMWARE_VERSION_MINOR < 100 && FIRMWARE_VERSION_PATCH < 100, "version code needs minor and patch below 100");
 
 #define PREFERRED_MTU        247
 #define TELEMETRY_PERIOD_MS  200
