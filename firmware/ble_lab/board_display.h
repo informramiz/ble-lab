@@ -74,6 +74,16 @@ static void begin() {
 }
 
 // Serial `tap x y` / `hold x y` use the same screen pixels as a finger; keep them on screen.
+// Debug screenshot as a PNG (malloc'd, caller free()s). panel=true reads the real panel back
+// (needs working readback, includes the tilt widget); panel=false composes the canvas and the
+// tilt sprite in RAM and never touches the panel. The composed path draws the tilt widget into
+// the canvas, which the next draw() overwrites.
+static void *snapshotPng(bool panel, size_t *len) {
+  if (panel) return M5.Display.createPng(len, 0, 0, M5.Display.width(), M5.Display.height());
+  tilt.pushSprite(&canvas, tiltX(), tiltY());
+  return canvas.createPng(len, 0, 0, canvas.width(), canvas.height());
+}
+
 static void clampToScreen(int &x, int &y) {
   x = x < 0 ? 0 : (x >= W ? W - 1 : x);
   y = y < 0 ? 0 : (y >= H ? H - 1 : y);
@@ -262,6 +272,10 @@ static void draw(const Frame &) {}
 static void drawTilt(bool, float, float) {}
 static void drawUpdate(int, bool) {}
 static void drawPasskey(uint32_t) {}
+static void *snapshotPng(bool, size_t *len) {
+  *len = 0;
+  return nullptr;
+}
 static void clampToScreen(int &, int &) {}
 }  // namespace board_display
 #endif

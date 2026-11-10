@@ -12,6 +12,8 @@
 //   tap <x> <y>    inject a tap at screen pixel (x, y); sent with the "injected" flag set
 //   hold <x> <y>   inject a long press
 //   imu            print one IMU sample
+//   snap           screenshot of the panel (readback) as base64 PNG, see firmware/tools/snap.py
+//   snapc          same, composed from the canvas + tilt sprite (no panel readback)
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -19,6 +21,7 @@
 #include <BLE2901.h>
 #include <BLESecurity.h>
 #include <math.h>
+#include <mbedtls/base64.h>
 #include "gatt_profile.h"
 #include "board_display.h"
 #include "board_sensors.h"
@@ -190,6 +193,29 @@ static void sendTouch(uint8_t kind, int16_t x, int16_t y, bool injected) {
   if (connected) touchChar->notify();
 }
 
+// Debug screenshot: base64 PNG between marker lines. Runs in loop(), so BLE events wait for it
+// (about a second); a debug feature, not for use during OTA or a demo.
+static void sendSnapshot(bool panel) {
+  size_t len = 0;
+  void *png = board_display::snapshotPng(panel, &len);
+  if (!png || len == 0) {
+    Serial.println("snap failed");
+    free(png);
+    return;
+  }
+  Serial.println("-----PNG BEGIN-----");
+  const uint8_t *p = (const uint8_t *)png;
+  unsigned char out[80];
+  for (size_t off = 0; off < len; off += 57) {  // 57 bytes -> one 76 character line
+    size_t n = len - off < 57 ? len - off : 57, o = 0;
+    mbedtls_base64_encode(out, sizeof(out), &o, p + off, n);
+    Serial.write(out, o);
+    Serial.write('\n');
+  }
+  Serial.println("-----PNG END-----");
+  free(png);
+}
+
 // Line-based serial console; see the header comment.
 static void pollConsole() {
   static char line[48];
@@ -209,6 +235,8 @@ static void pollConsole() {
     } else if (sscanf(line, "hold %d %d", &x, &y) == 2) {
       board_display::clampToScreen(x, y);
       sendTouch(TOUCH_KIND_HOLD, x, y, true);
+    } else if (strcmp(line, "snap") == 0 || strcmp(line, "snapc") == 0) {
+      sendSnapshot(line[4] == 0);
     } else if (strcmp(line, "imu") == 0) {
       board_sensors::ImuSample s;
       if (board_sensors::readImu(s)) {
