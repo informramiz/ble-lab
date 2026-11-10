@@ -155,7 +155,7 @@ static void draw(const Frame &f) {
   d.drawString("C", unitX, 76);
 
   // Lamp: glowing when on, outlined when off.
-  const int cx = W - 48, cy = 84, r = 22;
+  const int cx = W - 48, cy = 70, r = 20;  // Label must end above the Tilt label.
   if (f.ledOn) {
     d.fillCircle(cx, cy, r + 8, 0x4A40);
     d.fillCircle(cx, cy, r + 4, 0x9C80);
@@ -166,7 +166,7 @@ static void draw(const Frame &f) {
   d.setTextDatum(top_center);
   d.setFont(&fonts::FreeSans9pt7b);
   d.setTextColor(MUTED);
-  d.drawString(f.ledOn ? "LED on" : "LED off", cx, cy + r + 10);
+  d.drawString(f.ledOn ? "LED on" : "LED off", cx, cy + r + 8);
 
   drawMessageCard(d, f.message);
 
