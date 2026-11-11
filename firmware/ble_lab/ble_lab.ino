@@ -1,4 +1,4 @@
-// BLE Lab peripheral for ESP32 (Arduino-ESP32 core 3.3.x, Bluedroid BLE stack).
+// BLE Lab peripheral for ESP32 (Arduino-ESP32 core 3.3.x: Bluedroid on the ESP32, NimBLE on the ESP32-S3).
 // API reference: https://github.com/espressif/arduino-esp32/tree/master/libraries/BLE
 //
 // Services:
@@ -14,6 +14,7 @@
 //   imu            print one IMU sample
 //   snap           screenshot of the panel (readback) as base64 PNG, see firmware/tools/snap.py
 //   snapc          same, composed from the canvas + tilt sprite (no panel readback)
+//   bonds          bonded phones and their stored subscriptions (NimBLE builds)
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -26,6 +27,7 @@
 #include "board_display.h"
 #include "board_sensors.h"
 #include "ota_update.h"
+#include "cccd_store.h"
 
 #if !BOARD_HAS_DISPLAY && !defined(LED_BUILTIN)
 #define LED_BUILTIN 2  // Most ESP32 DevKit v1 boards wire the blue LED to GPIO2.
@@ -248,6 +250,10 @@ static void pollConsole() {
       } else {
         Serial.println("imu none");
       }
+#if defined(CONFIG_NIMBLE_ENABLED)
+    } else if (strcmp(line, "bonds") == 0) {
+      cccd_store::print();
+#endif
     }
   }
 }
@@ -346,6 +352,17 @@ static int onGapDiag(struct ble_gap_event *event, void *) {
   }
   return 0;
 }
+
+// Logs a store overflow before the host's default handler frees the oldest other bond for it.
+// With cccd_store sized for every bond this should not happen; if it does, the log says which bond went.
+class StoreCallbacks : public BLEDeviceCallbacks {
+  int onStoreStatus(struct ble_store_status_event *event, void *arg) override {
+    if (event->event_code == BLE_STORE_EVENT_OVERFLOW) {
+      Serial.printf("store: full (object type %d), deleting the oldest other bond\n", event->overflow.obj_type);
+    }
+    return ble_store_util_status_rr(event, arg);
+  }
+};
 #endif
 
 class MessageCallbacks : public BLECharacteristicCallbacks {
@@ -527,6 +544,9 @@ void setup() {
   BLEDevice::setSecurityCallbacks(new PairingCallbacks());
 #if defined(CONFIG_NIMBLE_ENABLED)
   ble_gap_event_listener_register(&gapDiagListener, onGapDiag, nullptr);
+  BLEDevice::setDeviceCallbacks(new StoreCallbacks());
+  cccd_store::install();
+  cccd_store::print();
 #endif
 
   server = BLEDevice::createServer();

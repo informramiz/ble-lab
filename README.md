@@ -4,7 +4,7 @@ One Bluetooth Low Energy profile, three codebases:
 
 | Folder | What it is | Stack |
 |---|---|---|
-| [`firmware/`](firmware/ble_lab) | ESP32 GATT peripheral | Arduino-ESP32 core 3.3.12 (Bluedroid BLE library) |
+| [`firmware/`](firmware/ble_lab) | ESP32 GATT peripheral | Arduino-ESP32 core 3.3.12 BLE library (NimBLE on the CoreS3 / ESP32-S3, Bluedroid on the plain ESP32) |
 | [`android/`](android) | Android central | Kotlin 2.4, Jetpack Compose (Material 3), Hilt, coroutines/Flow |
 | [`ios/`](ios) | iOS central | Swift 6 (strict concurrency), SwiftUI, Swift Charts, Core Bluetooth |
 
@@ -110,6 +110,7 @@ python3 firmware/tools/board.py --port COM4 tap 160 180 --snap after.png # tap, 
 python3 firmware/tools/board.py --port COM4 hold 160 180                 # long press
 python3 firmware/tools/board.py --port COM4 imu                          # one IMU sample
 python3 firmware/tools/board.py --port COM4 log --seconds 10             # serial log
+python3 firmware/tools/board.py --port COM4 bonds                        # bonded phones and stored subscriptions
 ```
 
 ```sh
@@ -159,12 +160,12 @@ Passed:
 - Passkey pairing: the board shows a random 6-digit code, the phone asks for it. The Android pairing prompt names the board (`ble-lab-esp32`).
 - Recording, history, session chart and CSV share.
 - Signed firmware update 1.3.0 → 1.3.1 over Bluetooth: verified, rebooted into the new image, the app reconnected.
+- Two phones bonded at once (firmware 1.3.9, POCO X3 Pro + an earlier bond): both bonds and all 10 subscriptions survive pairing and a board reset; no `rc=27` store-full log. Up to 1.3.8 the second bond overflowed NimBLE's 8-entry subscription table and evicted the first phone.
 - Refusals: an older image (anti-rollback), an unsigned image and one signed with the wrong key are all rejected, and the link stays up.
 - A Mac running `bleak` passes the same scan, connect, telemetry and LED checks (firmware 1.0.0).
 
 Not yet tested on hardware:
-- The iOS app against a real board.
-- Touch events from the board screen (needs a person tapping the board).
+- OTA from the iOS app against the real board.
 - Power cut in the middle of a firmware update (the bootloader should roll back).
 
 ## Android
