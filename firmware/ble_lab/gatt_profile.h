@@ -84,7 +84,7 @@
 // One source for the version: the revision string and the anti-rollback code derive from it.
 #define FIRMWARE_VERSION_MAJOR 1
 #define FIRMWARE_VERSION_MINOR 3
-#define FIRMWARE_VERSION_PATCH 8
+#define FIRMWARE_VERSION_PATCH 9
 #define BLE_LAB_STR_(x) #x
 #define BLE_LAB_STR(x) BLE_LAB_STR_(x)
 #define FIRMWARE_REVISION                                                                      \

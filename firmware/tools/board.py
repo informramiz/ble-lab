@@ -8,6 +8,7 @@
     board.py --port COM4 tap 100 60 --snap out.png  # tap, then screenshot while the ripple shows
     board.py --port COM4 imu                        # one IMU sample
     board.py --port COM4 log --seconds 10           # print the serial log
+    board.py --port COM4 bonds                      # bonded phones and stored subscriptions
 
 The port is opened with DTR/RTS low, so the board does not reset. Requires pyserial.
 """
@@ -84,6 +85,7 @@ def main() -> int:
         tp.add_argument("--delay", type=float, default=0.3, help="seconds between the touch and --snap")
 
     sub.add_parser("imu", help="print one IMU sample")
+    sub.add_parser("bonds", help="bonded phones and their stored subscriptions")
     lp = sub.add_parser("log", help="print serial output")
     lp.add_argument("--seconds", type=float, default=10.0)
 
@@ -101,6 +103,13 @@ def main() -> int:
         elif a.cmd == "imu":
             send(s, "imu")
             print(read_until(s, "imu ", 5.0))
+        elif a.cmd == "bonds":
+            send(s, "bonds")
+            print(read_until(s, "bonds: ", 5.0))
+            while line := s.readline().decode(errors="replace").rstrip():
+                if not line.startswith("  peer "):
+                    break
+                print(line)
         elif a.cmd == "log":
             end = time.monotonic() + a.seconds
             while time.monotonic() < end:
