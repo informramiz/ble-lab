@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+#if canImport(CoreBluetooth)
+import CoreBluetooth
+#endif
 @testable import BLELabKit
 
 @MainActor
@@ -159,7 +162,43 @@ import Testing
         #expect(BLEError.connectFailed(reason: "x").isRetryable)
         #expect(!BLEError.serviceNotFound.isRetryable)
         #expect(!BLEError.pairingFailed.isRetryable)
+        #expect(!BLEError.pairingRemoved.isRetryable)
         #expect(!BLEError.unauthorized.isRetryable)
+    }
+}
+
+@MainActor
+@Suite struct StaleBondTests {
+    @Test func staleBondStopsReconnectingAndShowsForgetGuidance() async {
+        let central = StaleBondCentral()
+        let sleeper = RecordingSleeper()
+        let manager = ConnectionManager(central: central, sleeper: sleeper, random: { 0.5 })
+        manager.connect(to: UUID())
+        #expect(await waitUntil { manager.state.isFailed })
+        #expect(manager.state == .failed(.pairingRemoved))
+        #expect(central.attempts == 1)
+        #expect(await sleeper.delays.isEmpty)
+        let text = BLEError.pairingRemoved.userMessage
+        #expect(text.contains("Forget This Device") && text.contains("ble-lab-esp32"))
+        #expect(BLEError.pairingRemoved.message != BLEError.pairingFailed.message)
+    }
+
+    #if canImport(CoreBluetooth)
+    @Test func coreBluetoothMapsRemovedPairingDistinctly() {
+        #expect(CoreBluetoothCentral.map(CBError(.peerRemovedPairingInformation)) == .pairingRemoved)
+        #expect(CoreBluetoothCentral.map(CBError(.encryptionTimedOut)) == .pairingFailed)
+    }
+    #endif
+}
+
+private final class StaleBondCentral: BLECentral, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var attempts: Int { lock.withLock { count } }
+    func scan(serviceFilter: UUID?) -> AsyncThrowingStream<ScannedDevice, any Error> { AsyncThrowingStream { $0.finish() } }
+    func connect(to id: UUID) async throws(BLEError) -> any GattLink {
+        lock.withLock { count += 1 }
+        throw .pairingRemoved
     }
 }
 
