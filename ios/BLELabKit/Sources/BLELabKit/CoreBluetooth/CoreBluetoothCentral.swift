@@ -133,7 +133,8 @@ public final class CoreBluetoothCentral: NSObject, BLECentral, @unchecked Sendab
         if let cb = error as? CBError {
             switch cb.code {
             case .connectionTimeout, .peripheralDisconnected, .connectionFailed: return .linkLost(reason: cb.localizedDescription)
-            case .encryptionTimedOut, .peerRemovedPairingInformation: return .pairingFailed
+            case .peerRemovedPairingInformation: return .pairingRemoved
+            case .encryptionTimedOut: return .pairingFailed
             default: return .connectFailed(reason: cb.localizedDescription)
             }
         }

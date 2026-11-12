@@ -110,7 +110,7 @@ private struct StatusCard: View {
     private var detail: String? {
         switch state {
         case .reconnecting(_, let delay, let cause): "\(cause.message). Next try in \(delay.formatted(.units(allowed: [.seconds], width: .narrow, fractionalPart: .show(length: 1))))"
-        case .failed(let error): error.message
+        case .failed(let error): error.userMessage
         case .ready(_, let length): "Notifications on · \(length)-byte writes"
         default: nil
         }
