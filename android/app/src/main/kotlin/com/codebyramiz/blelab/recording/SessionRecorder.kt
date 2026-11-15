@@ -23,44 +23,77 @@ class SessionRecorder(private val repository: RecordingRepository, private val c
 
     private val telemetryBuffer = mutableListOf<TelemetryPoint>()
     private val motionBuffer = mutableListOf<MotionPoint>()
-    private var boardOrigin: Long? = null
-    private var phoneOriginForBoard = 0L
+
+    /** Board clock of the previous motion sample; null until the first one of a session. */
+    private var lastBoardMillis: Long? = null
+
+    /** Board time elapsed since the clock was last anchored to the phone clock. */
+    private var boardElapsed = 0L
+    private var anchorPhoneMillis = 0L
+
+    /** True from the moment start/stop begin until they end, so samples and a second start cannot slip in while they suspend. */
+    private var transitioning = false
 
     suspend fun start(deviceAddress: String, deviceName: String?) {
-        if (_state.value is RecordingState.Recording) return
-        val now = clock.nowMillis()
-        val id = repository.start(deviceAddress, deviceName, now)
-        boardOrigin = null
-        _state.value = RecordingState.Recording(id, now, 0, 0)
+        if (_state.value is RecordingState.Recording || transitioning) return
+        transitioning = true
+        try {
+            val now = clock.nowMillis()
+            val id = repository.start(deviceAddress, deviceName, now)
+            telemetryBuffer.clear()
+            motionBuffer.clear()
+            lastBoardMillis = null
+            _state.value = RecordingState.Recording(id, now, 0, 0)
+        } finally {
+            transitioning = false
+        }
     }
 
     suspend fun onTelemetry(reading: Telemetry) {
-        val current = _state.value as? RecordingState.Recording ?: return
+        val current = activeRecording() ?: return
         telemetryBuffer += TelemetryPoint(clock.nowMillis() - current.startedAtMillis, reading.value, reading.ledOn)
         _state.value = current.copy(telemetryCount = current.telemetryCount + 1)
         flushIfFull(current.sessionId)
     }
 
-    /** Motion arrives in batches that share one phone arrival time, so spacing comes from the board clock. */
+    /**
+     * Motion arrives in batches that share one phone arrival time, so spacing comes from the board
+     * clock. The board clock restarts at zero when the board reboots (a firmware update, a crash)
+     * and wraps at 2^32 ms; a step backwards by more than half the range is a reboot, which anchors
+     * the board clock to the phone clock again, while a wrap is just a small forward step.
+     */
     suspend fun onMotion(sample: MotionSample) {
-        val current = _state.value as? RecordingState.Recording ?: return
-        val origin = boardOrigin ?: sample.boardMillis.also {
-            boardOrigin = it
-            phoneOriginForBoard = clock.nowMillis() - current.startedAtMillis
+        val current = activeRecording() ?: return
+        val last = lastBoardMillis
+        val step = if (last == null) null else (sample.boardMillis - last) and BOARD_CLOCK_MASK
+        if (step == null || step > BOARD_CLOCK_HALF_RANGE) {
+            anchorPhoneMillis = clock.nowMillis() - current.startedAtMillis
+            boardElapsed = 0L
+        } else {
+            boardElapsed += step
         }
-        motionBuffer += MotionPoint(phoneOriginForBoard + (sample.boardMillis - origin), sample.ax, sample.ay, sample.az, sample.gx, sample.gy, sample.gz)
+        lastBoardMillis = sample.boardMillis
+        motionBuffer += MotionPoint(anchorPhoneMillis + boardElapsed, sample.ax, sample.ay, sample.az, sample.gx, sample.gy, sample.gz)
         _state.value = current.copy(motionCount = current.motionCount + 1)
         flushIfFull(current.sessionId)
     }
 
     /** Writes what is buffered and closes the session. Returns its id, or null when nothing was recording. */
     suspend fun stop(): Long? {
-        val current = _state.value as? RecordingState.Recording ?: return null
-        flush(current.sessionId)
-        repository.finish(current.sessionId, clock.nowMillis())
-        _state.value = RecordingState.Idle
+        val current = activeRecording() ?: return null
+        // From here on samples are ignored, so the flush below drains everything that was accepted.
+        transitioning = true
+        try {
+            flush(current.sessionId)
+            repository.finish(current.sessionId, clock.nowMillis())
+            _state.value = RecordingState.Idle
+        } finally {
+            transitioning = false
+        }
         return current.sessionId
     }
+
+    private fun activeRecording(): RecordingState.Recording? = if (transitioning) null else _state.value as? RecordingState.Recording
 
     private suspend fun flushIfFull(sessionId: Long) {
         if (telemetryBuffer.size + motionBuffer.size >= batchSize) flush(sessionId)
@@ -77,5 +110,7 @@ class SessionRecorder(private val repository: RecordingRepository, private val c
 
     companion object {
         const val BATCH_SIZE = 50
+        private const val BOARD_CLOCK_MASK = 0xFFFF_FFFFL
+        private const val BOARD_CLOCK_HALF_RANGE = 0x7FFF_FFFFL
     }
 }

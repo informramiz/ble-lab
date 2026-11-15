@@ -213,7 +213,7 @@ class DeviceConnectionManager(
             try {
                 client.enableNotifications(GattProfile.LAB_SERVICE, optional)
             } catch (e: BleException) {
-                if (e.error !is BleError.Gatt) throw e
+                if (e.error !is BleError.Gatt && e.error != BleError.ServiceNotFound) throw e
             }
         }
 

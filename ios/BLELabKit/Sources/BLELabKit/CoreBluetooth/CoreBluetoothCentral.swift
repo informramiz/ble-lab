@@ -198,7 +198,7 @@ extension CoreBluetoothCentral: CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: (any Error)?) {
         links[peripheral.identifier] = nil
         let mapped: BLEError = error.map(Self.map) ?? .connectFailed(reason: "unknown")
-        connecting.removeValue(forKey: peripheral.identifier)?.resume(throwing: BLEError.connectFailed(reason: mapped.message))
+        connecting.removeValue(forKey: peripheral.identifier)?.resume(throwing: mapped)
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: (any Error)?) {
@@ -274,6 +274,7 @@ final class CoreBluetoothLink: NSObject, GattLink, CBPeripheralDelegate, @unchec
     func write(_ value: Data, to characteristic: AttributeID, in service: AttributeID) async throws(BLEError) {
         try await run { (c: CheckedContinuation<Void, any Error>) in
             guard let target = self.find(characteristic, in: service) else { return c.resume(throwing: BLEError.serviceNotFound) }
+            self.writes.removeValue(forKey: target.uuid)?.resume(throwing: BLEError.timeout)  // never leave a superseded write pending
             self.writes[target.uuid] = c
             self.peripheral.writeValue(value, for: target, type: .withResponse)
         }

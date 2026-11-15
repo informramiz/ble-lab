@@ -1,6 +1,9 @@
 // BLE Lab GATT profile. Must match android/ble/.../protocol/GattProfile.kt and ios/.../GattProfile.swift.
 #pragma once
 
+// GATT handles each service needs (Bluedroid reserves 15 unless told otherwise): lab 19, OTA 11.
+#define LAB_SERVICE_HANDLES  24
+#define OTA_SERVICE_HANDLES  16
 #define LAB_SERVICE_UUID     "b1e1ab00-5a1e-4c3a-9f5e-c0de00b1e1ab"
 // Notify + read. 7 bytes, little-endian: uint32 sequence, int16 value x100, uint8 flags.
 // Flags: bit0 = LED on, bit1 = board has a motion sensor (IMU), bit2 = board has a touchscreen.

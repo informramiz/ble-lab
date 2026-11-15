@@ -443,7 +443,7 @@ static constexpr uint32_t WRITE_NEEDS_ENCRYPTION = BLECharacteristic::PROPERTY_W
 static constexpr uint32_t WRITE_NEEDS_MITM = BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN;
 
 static void addOtaService() {
-  BLEService *svc = server->createService(OTA_SERVICE_UUID);
+  BLEService *svc = server->createService(BLEUUID(OTA_SERVICE_UUID), OTA_SERVICE_HANDLES);
 
   BLECharacteristic *control = svc->createCharacteristic(OTA_CONTROL_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE | WRITE_NEEDS_MITM);
   control->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
@@ -472,7 +472,9 @@ static void addOtaService() {
 }
 
 static void addLabService() {
-  BLEService *lab = server->createService(LAB_SERVICE_UUID);
+  // Bluedroid reserves only 15 handles per service by default; this one needs 19 (service 1, telemetry,
+  // motion and touch 4 each, LED and message 3 each), so ask for more explicitly.
+  BLEService *lab = server->createService(BLEUUID(LAB_SERVICE_UUID), LAB_SERVICE_HANDLES);
 
   telemetryChar = lab->createCharacteristic(
       TELEMETRY_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
