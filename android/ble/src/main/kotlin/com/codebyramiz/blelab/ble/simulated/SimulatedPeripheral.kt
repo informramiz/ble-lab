@@ -388,7 +388,7 @@ class SimulatedPeripheral(
 
         override suspend fun createBond() {
             delay(latencyMillis * 4)
-            if (staleCentralBond) return  // Like the real adapter: an existing phone-side bond is not re-created.
+            if (staleCentralBond) return // Like the real adapter: an existing phone-side bond is not re-created.
             if (!acceptBonding) throw BleException(BleError.BondingFailed)
             bonded = true
             staleCentralBond = false
