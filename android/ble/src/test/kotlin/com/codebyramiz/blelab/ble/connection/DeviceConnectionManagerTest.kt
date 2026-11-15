@@ -201,18 +201,24 @@ class DeviceConnectionManagerTest {
     }
 
     @Test
-    fun `a write the board rejects for insufficient authentication pairs and retries`() = runTest {
+    fun `a write rejected for insufficient authentication over a stale bond asks the user to forget the board`() = runTest {
         peripheral.requireBonding = true
         val manager = manager()
         manager.connect(peripheral.address)
         advanceTimeBy(3_000)
         peripheral.peerForgetsBond()
 
-        assertThat(manager.sendMessage("hi").isSuccess).isTrue()
+        val result = manager.sendMessage("hi")
+        assertThat((result.exceptionOrNull() as BleException).error).isEqualTo(BleError.StaleBond)
         assertThat(peripheral.insufficientAuthRejections).isEqualTo(1)
+        assertThat(peripheral.messages).isEmpty()
+        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
+
+        // The user forgets the board in system settings: the next write pairs up front and succeeds.
+        peripheral.forgetBond()
+        assertThat(manager.sendMessage("hi").isSuccess).isTrue()
         assertThat(peripheral.bonded).isTrue()
         assertThat(peripheral.messages).containsExactly("hi")
-        assertThat(manager.state.value).isInstanceOf(ConnectionState.Ready::class.java)
     }
 
     @Test

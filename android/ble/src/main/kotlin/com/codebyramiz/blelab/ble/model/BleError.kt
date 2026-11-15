@@ -28,6 +28,15 @@ sealed interface BleError {
         override val retryable = false
     }
 
+    /**
+     * The phone lists a bond, but the board rejects encrypted access: it lost its keys. Android cannot
+     * re-pair over an existing bond, so the user has to forget the board in system settings first.
+     */
+    data object StaleBond : BleError {
+        override val message = "The board no longer recognises this phone's pairing. Forget \"ble-lab\" in Bluetooth settings, then connect again"
+        override val retryable = false
+    }
+
     data object NotConnected : BleError {
         override val message = "Not connected"
         override val retryable = false

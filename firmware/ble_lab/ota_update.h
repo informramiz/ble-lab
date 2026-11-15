@@ -26,8 +26,9 @@ class OtaReceiver {
   // payload: OTA_CMD_START already stripped: size LE, SHA-256, version code LE, signature.
   bool start(const uint8_t *payload, size_t length) {
     if (state_ == OTA_STATE_DONE) return false;
-    if (length != OTA_START_LENGTH - 1) return fail(OTA_ERR_BAD_COMMAND);
+    // A START always ends a transfer in progress, even a malformed one, so Update never stays running.
     if (state_ == OTA_STATE_RECEIVING) Update.abort();
+    if (length != OTA_START_LENGTH - 1) return fail(OTA_ERR_BAD_COMMAND);
     uint32_t size = payload[0] | (payload[1] << 8) | (payload[2] << 16) | ((uint32_t)payload[3] << 24);
     const esp_partition_t *slot = esp_ota_get_next_update_partition(nullptr);
     if (slot == nullptr) return fail(OTA_ERR_BEGIN);
@@ -63,6 +64,7 @@ class OtaReceiver {
   // Verifies size, the SHA-256 the signature covers (inside Update.end, before the slot becomes
   // bootable) and the image header.
   bool finish() {
+    if (state_ == OTA_STATE_DONE) return true;  // A retried FINISH after success must not turn DONE into ERROR.
     if (state_ != OTA_STATE_RECEIVING) return fail(OTA_ERR_BAD_STATE);
     if (offset_ != size_) return abortWith(OTA_ERR_INCOMPLETE);
     if (!Update.end()) {

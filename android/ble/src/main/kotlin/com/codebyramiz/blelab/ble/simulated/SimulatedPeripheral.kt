@@ -84,6 +84,7 @@ class SimulatedPeripheral(
     /** Drops the stored bond, as the user does by unpairing in system settings. */
     fun forgetBond() {
         bonded = false
+        staleCentralBond = false
     }
 
     /**
@@ -387,6 +388,7 @@ class SimulatedPeripheral(
 
         override suspend fun createBond() {
             delay(latencyMillis * 4)
+            if (staleCentralBond) return  // Like the real adapter: an existing phone-side bond is not re-created.
             if (!acceptBonding) throw BleException(BleError.BondingFailed)
             bonded = true
             staleCentralBond = false

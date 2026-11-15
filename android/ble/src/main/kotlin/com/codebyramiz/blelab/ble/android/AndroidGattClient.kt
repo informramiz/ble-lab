@@ -189,11 +189,16 @@ class AndroidGattClient(
             val target = current.characteristic(service, characteristic)
             try {
                 // The stack accepts one write at a time and answers BUSY until the previous one has left; wait it out.
-                withTimeout(OPERATION_TIMEOUT_MILLIS) {
-                    while (writeCharacteristic(current, target, value, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == WRITE_BUSY) {
+                val result = withTimeout(OPERATION_TIMEOUT_MILLIS) {
+                    var code = writeCharacteristic(current, target, value, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+                    while (code == WRITE_BUSY) {
                         delay(WRITE_BUSY_RETRY_MILLIS)
+                        code = writeCharacteristic(current, target, value, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
                     }
+                    code
                 }
+                // Anything but accepted (not connected, not allowed, ...) means the chunk never left: fail now, not as a stalled transfer.
+                if (result != WRITE_ACCEPTED) throw BleException(BleError.Gatt(result))
             } catch (e: TimeoutCancellationException) {
                 throw BleException(BleError.Gatt(GattStatus.OPERATION_TIMEOUT))
             }

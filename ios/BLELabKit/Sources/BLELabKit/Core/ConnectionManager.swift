@@ -22,6 +22,7 @@ public final class ConnectionManager {
     private let sleeper: any Sleeper
     private let random: @Sendable () -> Double
     private let writeTimeout: Duration
+    private let connectTimeout: Duration
     private let timeoutSleeper: any Sleeper
     private let telemetryContinuation: AsyncStream<Telemetry>.Continuation
     private let motionContinuation: AsyncStream<MotionSample>.Continuation
@@ -37,9 +38,11 @@ public final class ConnectionManager {
         sleeper: any Sleeper = TaskSleeper(),
         random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
         writeTimeout: Duration = .seconds(45),
+        connectTimeout: Duration = .seconds(15),
         timeoutSleeper: any Sleeper = TaskSleeper()
     ) {
         self.writeTimeout = writeTimeout
+        self.connectTimeout = connectTimeout
         self.timeoutSleeper = timeoutSleeper
         self.central = central
         self.backoff = backoff
@@ -113,15 +116,17 @@ public final class ConnectionManager {
         guard let payload = MessageCodec.encode(text) else { throw .unexpected("Message is blank") }
         guard let link, case .ready = state else { throw .notConnected }
         do throws(BLEError) {
-            try await link.write(payload, to: .custom(GattProfile.message), in: .custom(GattProfile.labService))
+            try await withTimeout { () async throws(BLEError) in
+                try await link.write(payload, to: .custom(GattProfile.message), in: .custom(GattProfile.labService))
+            }
         } catch .insufficientEncryption {
             throw .pairingFailed
         }
     }
 
     /// Sends `image` to the board. Needs a ready session on a board with the OTA service. The first
-    /// subscription to the board's status makes iOS ask for pairing (the passkey is on the board's screen);
-    /// a refusal fails with `.link(.pairingFailed)`. On success the board restarts and the session
+    /// write to the board's control characteristic (the start command) makes iOS ask for pairing (the passkey
+    /// is on the board's screen); a refusal fails with `.link(.pairingFailed)`. On success the board restarts and the session
     /// reconnects by itself; watch `state` for that. Cancel the calling task to abort the transfer.
     public func updateFirmware(_ image: FirmwareImage, onProgress: @escaping @Sendable (OtaProgress) -> Void) async throws(OtaFailure) {
         guard let link, case .ready = state else { throw .link(.notConnected) }
@@ -135,8 +140,6 @@ public final class ConnectionManager {
         let ota = SessionOtaLink(link: link, status: statuses)
         do throws(BLEError) {
             try await link.setNotify(true, for: .custom(GattProfile.otaStatus), in: .custom(GattProfile.otaService))
-        } catch .insufficientEncryption {
-            throw .link(.pairingFailed)
         } catch {
             throw .link(error)
         }
@@ -174,7 +177,7 @@ public final class ConnectionManager {
 
     /// One connection, from connect to link loss. Returns the reason the link went down.
     private func runSession(_ id: UUID, onReady: () -> Void) async throws(BLEError) -> BLEError {
-        let link = try await central.connect(to: id)
+        let link = try await connectWithTimeout(id)
         self.link = link
         do throws(BLEError) {
             state = .discovering
@@ -222,6 +225,30 @@ public final class ConnectionManager {
         } catch {
             await link.disconnect()
             throw error
+        }
+    }
+
+    /// Connects, giving up with `.timeout` (retryable) after `connectTimeout`: Core Bluetooth connect
+    /// requests never time out by themselves. The losing connect is cancelled, which drops the pending link.
+    private func connectWithTimeout(_ id: UUID) async throws(BLEError) -> any GattLink {
+        let central = central
+        let sleeper = timeoutSleeper
+        let limit = connectTimeout
+        do {
+            return try await withThrowingTaskGroup(of: (any GattLink)?.self) { group in
+                group.addTask { try await central.connect(to: id) }
+                group.addTask {
+                    try await sleeper.sleep(for: limit)
+                    return nil
+                }
+                defer { group.cancelAll() }
+                guard let first = try await group.next(), let link = first else { throw BLEError.timeout }
+                return link
+            }
+        } catch let error as BLEError {
+            throw error
+        } catch {
+            throw .connectFailed(reason: "cancelled")
         }
     }
 

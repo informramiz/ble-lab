@@ -103,3 +103,36 @@ struct ImmediateSleeper: Sleeper {
         #expect(text.contains("6-digit code shown on the board"))
     }
 }
+
+/// A central whose connect request never completes on its own (board off or out of range); it ends only when cancelled.
+private final class HangingCentral: BLECentral, @unchecked Sendable {
+    func scan(serviceFilter: UUID?) -> AsyncThrowingStream<ScannedDevice, any Error> { AsyncThrowingStream { $0.finish() } }
+    func connect(to id: UUID) async throws(BLEError) -> any GattLink {
+        try? await Task.sleep(for: .seconds(3600))
+        throw .connectFailed(reason: "cancelled")
+    }
+}
+
+@MainActor
+@Suite struct TimeoutTests {
+    @Test(.timeLimit(.minutes(1))) func unansweredConnectTimesOutAndIsRetried() async {
+        let manager = ConnectionManager(
+            central: HangingCentral(),
+            backoff: BackoffPolicy(maxAttempts: 2),
+            sleeper: RecordingSleeper(),
+            timeoutSleeper: ImmediateSleeper()
+        )
+        manager.connect(to: UUID())
+        #expect(await waitUntil { manager.state.isFailed })
+        #expect(manager.state == .failed(.timeout))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func unansweredMessageWriteTimesOut() async {
+        let board = StubBoard()
+        board.writeBehavior = .hang
+        let slow = ConnectionManager(central: board, sleeper: RecordingSleeper(), timeoutSleeper: ImmediateSleeper())
+        slow.connect(to: UUID())
+        #expect(await waitUntil { slow.state.isReady })
+        await #expect(throws: BLEError.timeout) { try await slow.sendMessage("hi") }
+    }
+}
