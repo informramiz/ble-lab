@@ -18,6 +18,7 @@ import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.recording.SessionRecorder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -180,6 +181,7 @@ class DeviceViewModel @Inject constructor(
     }
 
     /** Closes an open recording; called when the screen is left so the session gets an end time. */
+    @OptIn(DelicateCoroutinesApi::class) // ATOMIC: the launch cannot be cancelled before its first suspension
     fun stopRecording() {
         // The screen is popped right after this call and may clear the ViewModel (and cancel its scope)
         // before the write finishes; the session must still get its last rows and its end time.
