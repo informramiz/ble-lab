@@ -11,6 +11,14 @@ public protocol OtaLink: Sendable {
     func writeControl(_ value: Data) async throws(BLEError)
     /// Write without response to the data characteristic. Returns once the bytes are handed to the radio.
     func writeData(_ value: Data) async throws(BLEError)
+    /// Called when a write was given up on (timeout or cancellation) while the link had not answered it.
+    /// The link must drop the connection so the stuck write fails and a late acknowledgement cannot be
+    /// mistaken for a later write's.
+    func abandonPendingWrites() async
+}
+
+extension OtaLink {
+    public func abandonPendingWrites() async {}
 }
 
 public enum OtaProgress: Equatable, Sendable {
@@ -135,19 +143,70 @@ public struct OtaUpdater: Sendable {
     }
 
     private func control(_ value: Data) async throws(OtaFailure) {
-        do { try await link.writeControl(value) } catch { throw .link(error) }
-        if Task.isCancelled { throw .cancelled }
+        let link = link
+        try await bounded { () async throws(BLEError) in try await link.writeControl(value) }
     }
 
     private func data(_ value: Data) async throws(OtaFailure) {
-        do { try await link.writeData(value) } catch { throw .link(error) }
+        let link = link
+        try await bounded { () async throws(BLEError) in try await link.writeData(value) }
+    }
+
+    /// Runs one write, ending the wait on a stall (`stallTimeout`) or when the calling task is cancelled.
+    /// A Core Bluetooth write cannot be cancelled, so a write given up on makes the link drop the connection.
+    private func bounded(_ write: @escaping @Sendable () async throws(BLEError) -> Void) async throws(OtaFailure) {
+        if Task.isCancelled { throw .cancelled }
+        let race = TimeoutRace<OtaFailure>()
+        let sleeper = sleeper
+        let limit = stallTimeout
+        let result: Result<Void, OtaFailure> = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                race.install(continuation)
+                if Task.isCancelled { return race.finish(.failure(.cancelled)) }
+                Task {
+                    do throws(BLEError) {
+                        try await write()
+                        race.finish(.success(()))
+                    } catch {
+                        race.finish(.failure(.link(error)))
+                    }
+                }
+                let timer = Task {
+                    do { try await sleeper.sleep(for: limit) } catch { return }
+                    race.finish(.failure(.stalled))
+                }
+                race.onFinish { timer.cancel() }
+            }
+        } onCancel: {
+            race.finish(.failure(.cancelled))
+        }
+        if case .failure(let failure) = result {
+            if failure == .stalled || failure == .cancelled { await link.abandonPendingWrites() }
+            throw failure
+        }
         if Task.isCancelled { throw .cancelled }
     }
 
     /// Best effort, and runs even when the calling task is cancelled: tells the board to drop the transfer.
+    /// Bounded, so a link that no longer answers cannot hang the caller.
     private func abort() async {
         let link = link
-        await Task { try? await link.writeControl(OtaProtocol.abort) }.value
+        let sleeper = sleeper
+        let limit = stallTimeout
+        let race = TimeoutRace<OtaFailure>()
+        let result: Result<Void, OtaFailure> = await withCheckedContinuation { continuation in
+            race.install(continuation)
+            Task {
+                try? await link.writeControl(OtaProtocol.abort)
+                race.finish(.success(()))
+            }
+            let timer = Task {
+                do { try await sleeper.sleep(for: limit) } catch { return }
+                race.finish(.failure(.stalled))
+            }
+            race.onFinish { timer.cancel() }
+        }
+        if case .failure = result { await link.abandonPendingWrites() }
     }
 }
 

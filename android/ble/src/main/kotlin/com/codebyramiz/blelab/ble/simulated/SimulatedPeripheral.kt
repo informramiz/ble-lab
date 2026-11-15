@@ -380,7 +380,7 @@ class SimulatedPeripheral(
 
         override suspend fun enableNotifications(service: UUID, characteristic: UUID) = op {
             val supported = characteristic == GattProfile.TELEMETRY || (characteristic == GattProfile.OTA_STATUS && supportsOta) || (hasBoardSensors && characteristic != GattProfile.OTA_STATUS)
-            if (!supported) throw BleException(BleError.Gatt(GattStatus.GATT_FAILURE))
+            if (!supported) throw BleException(BleError.ServiceNotFound)
             notifying.value += characteristic
         }
 

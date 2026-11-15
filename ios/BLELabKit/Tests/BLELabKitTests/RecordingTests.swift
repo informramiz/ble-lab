@@ -143,3 +143,80 @@ struct TiltAndChartTests {
         #expect(Series.downsample([1, 2, 3], max: 300) == [1, 2, 3])
     }
 }
+
+/// Wraps a repository and holds every append until the test releases it.
+private actor GatedRepository: RecordingRepository {
+    private let base = InMemoryRecordingRepository()
+    private var gate: CheckedContinuation<Void, Never>?
+    private var held = false
+    private var appends = 0
+    var appendCount: Int { appends }
+
+    func holdAppends() { held = true }
+    func release() { held = false; gate?.resume(); gate = nil }
+
+    func start(deviceAddress: String, deviceName: String?, startedAtMillis: Int64) async throws -> Int {
+        try await base.start(deviceAddress: deviceAddress, deviceName: deviceName, startedAtMillis: startedAtMillis)
+    }
+    func append(sessionId: Int, telemetry: [TelemetryPoint], motion: [MotionPoint]) async throws {
+        appends += 1
+        if held { await withCheckedContinuation { gate = $0 } }
+        try await base.append(sessionId: sessionId, telemetry: telemetry, motion: motion)
+    }
+    func finish(sessionId: Int, endedAtMillis: Int64) async throws { try await base.finish(sessionId: sessionId, endedAtMillis: endedAtMillis) }
+    func closeOrphans() async throws { try await base.closeOrphans() }
+    func sessions() async throws -> [RecordingSession] { try await base.sessions() }
+    func load(sessionId: Int) async throws -> SessionData? { try await base.load(sessionId: sessionId) }
+    func delete(sessionId: Int) async throws { try await base.delete(sessionId: sessionId) }
+}
+
+@MainActor
+struct SessionRecorderTimeTests {
+    @Test func boardRebootDuringRecordingReanchorsMotionTime() async throws {
+        let repo = InMemoryRecordingRepository()
+        let clock = FakeClock()
+        let recorder = SessionRecorder(repository: repo, clock: clock, batchSize: 100)
+        await recorder.start(deviceAddress: "A", deviceName: nil)
+        clock.now = 1_100
+        await recorder.onMotion(motion(60_000))
+        await recorder.onMotion(motion(60_020))
+        clock.now = 1_400  // The board restarted; its clock began again at 40 ms.
+        await recorder.onMotion(motion(40))
+        await recorder.onMotion(motion(60))
+        let id = await recorder.stop()
+        #expect(try await repo.load(sessionId: id ?? -1)?.motion.map(\.tMillis) == [100, 120, 400, 420])
+    }
+
+    @Test func boardClockWrapIsAForwardStep() async throws {
+        let repo = InMemoryRecordingRepository()
+        let clock = FakeClock()
+        let recorder = SessionRecorder(repository: repo, clock: clock, batchSize: 100)
+        await recorder.start(deviceAddress: "A", deviceName: nil)
+        clock.now = 1_100
+        await recorder.onMotion(motion(0xFFFF_FFF6))
+        await recorder.onMotion(motion(10))
+        let id = await recorder.stop()
+        #expect(try await repo.load(sessionId: id ?? -1)?.motion.map(\.tMillis) == [100, 120])
+    }
+
+    @Test(.timeLimit(.minutes(1))) func samplesWhileStopIsWritingAreIgnoredAndDoNotLeakIntoTheNextSession() async throws {
+        let repo = GatedRepository()
+        let clock = FakeClock()
+        let recorder = SessionRecorder(repository: repo, clock: clock, batchSize: 100)
+        await recorder.start(deviceAddress: "A", deviceName: nil)
+        await recorder.onTelemetry(Telemetry(sequence: 1, value: 1, ledOn: false))
+        await repo.holdAppends()
+        let stopping = Task { await recorder.stop() }
+        while await repo.appendCount == 0 { await Task.yield() }  // stop is now suspended inside append
+        await recorder.onTelemetry(Telemetry(sequence: 2, value: 2, ledOn: false))
+        await recorder.start(deviceAddress: "B", deviceName: nil)  // not allowed while stopping
+        await repo.release()
+        _ = await stopping.value
+        #expect(recorder.state == .idle)
+        await recorder.start(deviceAddress: "C", deviceName: nil)
+        guard case .recording(let id, _, _, _) = recorder.state else { Issue.record("not recording"); return }
+        #expect(try await repo.load(sessionId: id)?.telemetry.isEmpty == true)
+        #expect(try await repo.load(sessionId: 1)?.telemetry.count == 1)
+        #expect(try await repo.sessions().count == 2)
+    }
+}

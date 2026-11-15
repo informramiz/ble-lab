@@ -17,7 +17,9 @@ import com.codebyramiz.blelab.recording.RecordingRepository
 import com.codebyramiz.blelab.recording.RecordingState
 import com.codebyramiz.blelab.recording.SessionRecorder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
@@ -178,7 +181,9 @@ class DeviceViewModel @Inject constructor(
 
     /** Closes an open recording; called when the screen is left so the session gets an end time. */
     fun stopRecording() {
-        viewModelScope.launch { recorder.stop() }
+        // The screen is popped right after this call and may clear the ViewModel (and cancel its scope)
+        // before the write finishes; the session must still get its last rows and its end time.
+        viewModelScope.launch(start = CoroutineStart.ATOMIC) { withContext(NonCancellable) { recorder.stop() } }
     }
 
     /** [bytes] is the picked file's content, or null when it could not be read. */

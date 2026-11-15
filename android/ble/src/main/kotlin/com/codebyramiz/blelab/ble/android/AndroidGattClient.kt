@@ -68,7 +68,12 @@ class AndroidGattClient(
 
     @Volatile private var connectResult: CompletableDeferred<Unit>? = null
 
-    @Volatile private var pending: CompletableDeferred<Any>? = null
+    @Volatile private var pending: PendingOperation? = null
+
+    /** What the in-flight operation waits for; a callback of another kind is a late one and is dropped. */
+    private enum class Kind { MTU, DISCOVERY, READ, WRITE, DESCRIPTOR }
+
+    private class PendingOperation(val kind: Kind, val result: CompletableDeferred<Any> = CompletableDeferred())
 
     /**
      * Characteristic of the write-with-response in flight. A write-without-response may still
@@ -87,28 +92,28 @@ class AndroidGattClient(
                 if (connecting != null && !connecting.isCompleted) {
                     connecting.completeExceptionally(BleException(BleError.Gatt(status)))
                 } else {
-                    pending?.completeExceptionally(BleException(BleError.LinkLost(status)))
+                    pending?.result?.completeExceptionally(BleException(BleError.LinkLost(status)))
                     _events.tryEmit(GattEvent.Disconnected(status))
                 }
             }
         }
 
-        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) = finish(status) { mtu }
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) = finish(Kind.MTU, status) { mtu }
 
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) = finish(status) { gatt.services.map { it.uuid }.toSet() }
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) = finish(Kind.DISCOVERY, status) { gatt.services.map { it.uuid }.toSet() }
 
-        override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) = finish(status) { value }
+        override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) = finish(Kind.READ, status) { value }
 
         @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
         override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) finish(status) { characteristic.value ?: ByteArray(0) }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) finish(Kind.READ, status) { characteristic.value ?: ByteArray(0) }
         }
 
         override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (characteristic.uuid == pendingWrite) finish(status) { Unit }
+            if (characteristic.uuid == pendingWrite) finish(Kind.WRITE, status) { Unit }
         }
 
-        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) = finish(status) { Unit }
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) = finish(Kind.DESCRIPTOR, status) { Unit }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             _events.tryEmit(GattEvent.Notification(characteristic.uuid, value))
@@ -122,8 +127,8 @@ class AndroidGattClient(
         }
     }
 
-    private fun finish(status: Int, value: () -> Any) {
-        val op = pending ?: return
+    private fun finish(kind: Kind, status: Int, value: () -> Any) {
+        val op = pending?.takeIf { it.kind == kind }?.result ?: return
         if (status == GattStatus.SUCCESS) op.complete(value()) else op.completeExceptionally(BleException(BleError.Gatt(status)))
     }
 
@@ -161,18 +166,18 @@ class AndroidGattClient(
             return device.bondState == BluetoothDevice.BOND_BONDED
         }
 
-    override suspend fun requestMtu(mtu: Int): Int = operation { it.requestMtu(mtu) } as Int
+    override suspend fun requestMtu(mtu: Int): Int = operation(Kind.MTU) { it.requestMtu(mtu) } as Int
 
     @Suppress("UNCHECKED_CAST")
-    override suspend fun discoverServices(): Set<UUID> = operation { it.discoverServices() } as Set<UUID>
+    override suspend fun discoverServices(): Set<UUID> = operation(Kind.DISCOVERY) { it.discoverServices() } as Set<UUID>
 
-    override suspend fun read(service: UUID, characteristic: UUID): ByteArray = operation { gatt ->
+    override suspend fun read(service: UUID, characteristic: UUID): ByteArray = operation(Kind.READ) { gatt ->
         gatt.readCharacteristic(gatt.characteristic(service, characteristic))
     } as ByteArray
 
     override suspend fun write(service: UUID, characteristic: UUID, value: ByteArray) {
         try {
-            operation { gatt ->
+            operation(Kind.WRITE) { gatt ->
                 val target = gatt.characteristic(service, characteristic)
                 pendingWrite = characteristic
                 writeCharacteristic(gatt, target, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == WRITE_ACCEPTED
@@ -206,7 +211,7 @@ class AndroidGattClient(
     }
 
     override suspend fun enableNotifications(service: UUID, characteristic: UUID) {
-        operation { gatt ->
+        operation(Kind.DESCRIPTOR) { gatt ->
             val target = gatt.characteristic(service, characteristic)
             val cccd = target.getDescriptor(GattProfile.CCCD) ?: throw BleException(BleError.ServiceNotFound)
             gatt.setCharacteristicNotification(target, true) &&
@@ -245,23 +250,29 @@ class AndroidGattClient(
     override fun close() {
         val current = gatt ?: return
         gatt = null
-        pending?.completeExceptionally(BleException(BleError.NotConnected))
+        pending?.result?.completeExceptionally(BleException(BleError.NotConnected))
         // disconnect() then close(): close() alone can leave the link up until supervision timeout,
         // and a leaked BluetoothGatt eventually exhausts the stack's client slots (status 133).
         runCatching { current.disconnect() }
         runCatching { current.close() }
     }
 
-    /** Starts one GATT operation; [start] returns false if the stack refused to queue it. */
-    private suspend fun operation(start: (BluetoothGatt) -> Boolean): Any = operationLock.withLock {
+    /**
+     * Starts one GATT operation of [kind]; [start] returns false if the stack refused to queue it.
+     * An operation that times out (except the optional MTU exchange) drops the link: the stack may still answer it later, and that
+     * answer must not be taken for the next operation's. The manager then reconnects as for any loss.
+     */
+    private suspend fun operation(kind: Kind, start: (BluetoothGatt) -> Boolean): Any = operationLock.withLock {
         BlePermissionCheck.requireConnect(context)
         val current = gatt ?: throw BleException(BleError.NotConnected)
-        val op = CompletableDeferred<Any>()
+        val op = PendingOperation(kind)
         pending = op
         try {
             if (!start(current)) throw BleException(BleError.Gatt(GattStatus.GATT_FAILURE))
-            withTimeout(OPERATION_TIMEOUT_MILLIS) { op.await() }
+            withTimeout(OPERATION_TIMEOUT_MILLIS) { op.result.await() }
         } catch (e: TimeoutCancellationException) {
+            // A late MTU answer can only complete another MTU request, and that exchange is optional, so keep the link for it.
+            if (kind != Kind.MTU) runCatching { current.disconnect() }
             throw BleException(BleError.Gatt(GattStatus.OPERATION_TIMEOUT))
         } finally {
             pending = null

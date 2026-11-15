@@ -77,7 +77,7 @@ public final class ConnectionManager {
         guard let link, case .ready = state else { throw .notConnected }
         let value = TelemetryCodec.encodeLed(on)
         do throws(BLEError) {
-            try await withTimeout { () async throws(BLEError) in
+            try await withTimeout(on: link) { () async throws(BLEError) in
                 try await link.write(value, to: .custom(GattProfile.led), in: .custom(GattProfile.labService))
             }
         } catch .insufficientEncryption {
@@ -85,10 +85,11 @@ public final class ConnectionManager {
         }
     }
 
-    /// Runs `operation`, giving up with `.timeout` after `writeTimeout`. The operation is not cancelled
-    /// (a Core Bluetooth write cannot be), its late result is dropped.
-    private func withTimeout(_ operation: @escaping @Sendable () async throws(BLEError) -> Void) async throws(BLEError) {
-        let race = TimeoutRace()
+    /// Runs `operation`, giving up with `.timeout` after `writeTimeout`. A Core Bluetooth write cannot be
+    /// cancelled, so on timeout the link is dropped: that fails the stuck write and guarantees a late
+    /// acknowledgement can never confirm a retry. The session then reconnects by itself.
+    private func withTimeout(on link: any GattLink, _ operation: @escaping @Sendable () async throws(BLEError) -> Void) async throws(BLEError) {
+        let race = TimeoutRace<BLEError>()
         let sleeper = timeoutSleeper
         let limit = writeTimeout
         let result: Result<Void, BLEError> = await withCheckedContinuation { continuation in
@@ -107,6 +108,7 @@ public final class ConnectionManager {
             }
             race.onFinish { timer.cancel() }
         }
+        if case .failure(.timeout) = result { await link.disconnect() }
         try result.get()
     }
 
@@ -116,7 +118,7 @@ public final class ConnectionManager {
         guard let payload = MessageCodec.encode(text) else { throw .unexpected("Message is blank") }
         guard let link, case .ready = state else { throw .notConnected }
         do throws(BLEError) {
-            try await withTimeout { () async throws(BLEError) in
+            try await withTimeout(on: link) { () async throws(BLEError) in
                 try await link.write(payload, to: .custom(GattProfile.message), in: .custom(GattProfile.labService))
             }
         } catch .insufficientEncryption {
@@ -267,6 +269,8 @@ private struct SessionOtaLink: OtaLink {
 
     var dataChunkSize: Int { get async { await link.maximumWriteWithoutResponseLength } }
 
+    func abandonPendingWrites() async { await link.disconnect() }
+
     func writeControl(_ value: Data) async throws(BLEError) {
         do throws(BLEError) {
             try await link.write(value, to: .custom(GattProfile.otaControl), in: .custom(GattProfile.otaService))
@@ -281,34 +285,5 @@ private struct SessionOtaLink: OtaLink {
         } catch .insufficientEncryption {
             throw .pairingFailed
         }
-    }
-}
-
-
-/// First result wins; later ones are ignored.
-private final class TimeoutRace: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Result<Void, BLEError>, Never>?
-    private var cleanup: (@Sendable () -> Void)?
-    private var done = false
-
-    func install(_ continuation: CheckedContinuation<Result<Void, BLEError>, Never>) { lock.withLock { self.continuation = continuation } }
-    func onFinish(_ cleanup: @escaping @Sendable () -> Void) {
-        let runNow = lock.withLock { () -> Bool in
-            if done { return true }
-            self.cleanup = cleanup
-            return false
-        }
-        if runNow { cleanup() }
-    }
-
-    func finish(_ result: Result<Void, BLEError>) {
-        let (continuation, cleanup) = lock.withLock { () -> (CheckedContinuation<Result<Void, BLEError>, Never>?, (@Sendable () -> Void)?) in
-            guard !done else { return (nil, nil) }
-            done = true
-            return (self.continuation, self.cleanup)
-        }
-        continuation?.resume(returning: result)
-        cleanup?()
     }
 }
