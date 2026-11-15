@@ -213,8 +213,11 @@ What the Android side handles:
   leaked clients are a classic source of 133.
 - **Reconnect**: exponential backoff (500 ms doubling to 16 s, ±20% jitter, 6 attempts); the
   counter resets after each successful session, so a long session that drops starts fresh.
-- **Bonding**: when a write fails with insufficient authentication/encryption, the manager calls
-  `createBond()`, waits for `ACTION_BOND_STATE_CHANGED`, and retries the write once.
+- **Bonding**: with no bond, the manager calls `createBond()` right after connecting (and before any
+  protected operation) and waits for `ACTION_BOND_STATE_CHANGED`. If the board still answers insufficient
+  authentication/encryption while the phone lists a bond (the board lost its keys), `createBond()` cannot
+  re-pair over it, so the write fails with `BleError.StaleBond` and the user must forget the board in
+  Bluetooth settings.
 
 ## iOS
 
@@ -241,7 +244,7 @@ iOS-specific notes:
 - **Firmware update**: chunks are sized from `maximumWriteValueLength(for: .withoutResponse)`, and the data
   writes wait on `canSendWriteWithoutResponse` and `peripheralIsReady(toSendWriteWithoutResponse:)`, because
   Core Bluetooth drops a write-without-response when its queue is full. The card picks the file with `fileImporter`.
-  The pairing prompt appears when the OTA status subscription is made, i.e. when Update is tapped.
+  The pairing prompt appears at the first write to the OTA control characteristic (the start command), i.e. when Update is tapped; subscribing to the status needs no pairing. Connecting gives up after 15 s and retries with backoff.
 - **State restoration**: the central is created with `CBCentralManagerOptionRestoreIdentifierKey`
   and `UIBackgroundModes = bluetooth-central`, and records restored peripheral IDs in
   `centralManager(_:willRestoreState:)`. Full relaunch-into-session handling is a device-only flow
@@ -271,9 +274,9 @@ built-in demo peripheral: [`docs/screenshots/ios`](docs/screenshots/ios).
 
 | Suite | What it proves |
 |---|---|
-| Android `:ble` (106 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
-| Android `:app` (84 tests, 28 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
-| iOS `BLELabKit` (151 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing, and the OTA path: `.signed.bin` parsing, START/data/END framing, flow-control window, progress, cancel, bad-signature/downgrade/too-large rejections, reboot confirmation |
+| Android `:ble` (115 tests) | telemetry codec (round trip, little-endian layout, unsigned sequence, clamping, short payloads), GATT status mapping, backoff growth/jitter/cap, scan aggregation and ageing, demo + real scanner merging, and the connection state machine: happy path with MTU and device info, MTU rejection falling back to 23, 133 retries then success, giving up after max attempts, non-retryable errors, link drop and reconnect with counter reset, pairing on demand and pairing refused, user disconnect stopping the reconnect loop; motion, touch and message codecs and their simulated peripheral |
+| Android `:app` (85 tests, 29 of them Compose/Roborazzi screen tests) | permission sets per API level, scan/device ViewModels over the simulated peripheral (streaming into the chart, LED write and rollback, retry after giving up, motion/touch/message state), recording sessions and CSV export, the Room repository, history and session ViewModels, tilt maths, Roborazzi screenshots of each screen state |
+| iOS `BLELabKit` (153 tests) | the same codec/backoff/state-machine cases as Android, Core Bluetooth error mapping, simulated central scan/connect, scan and device models, composite (real + demo) central routing, and the OTA path: `.signed.bin` parsing, START/data/END framing, flow-control window, progress, cancel, bad-signature/downgrade/too-large rejections, reboot confirmation |
 
 CI (`.github/workflows/ci.yml`): Android format, lint, unit and screenshot verification, Kover line
 coverage gate (80% minimum; currently 92.7% of lines, radio adapters excluded); firmware compile; iOS `swift test` and the simulator build.

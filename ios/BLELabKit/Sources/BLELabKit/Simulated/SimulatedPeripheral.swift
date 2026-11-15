@@ -284,8 +284,8 @@ public actor SimulatedPeripheral {
     func setNotify(_ enabled: Bool, for characteristic: AttributeID) throws(BLEError) {
         guard case .custom(let uuid) = characteristic, Self.notifiable.contains(uuid) else { throw .serviceNotFound }
         if uuid == GattProfile.otaStatus {
+            // The status characteristic needs no encryption on the board; the start command write does.
             guard supportsOta else { throw .serviceNotFound }
-            try pairIfRequired()
             if enabled { notifying.insert(uuid) } else { notifying.remove(uuid) }
             return
         }

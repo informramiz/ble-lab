@@ -23,6 +23,9 @@ public final class CoreBluetoothCentral: NSObject, BLECentral, @unchecked Sendab
     private var seen: [UUID: CBPeripheral] = [:]
     private var connecting: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var links: [UUID: CoreBluetoothLink] = [:]
+    /// Links replaced by a new connect before Core Bluetooth reported their disconnect; that late callback
+    /// belongs to the old connection and must not tear down the new one.
+    private var retiredDisconnects: [UUID: Int] = [:]
     private var availabilityObservers: [UUID: AsyncStream<Bool>.Continuation] = [:]
     public private(set) var restoredPeripheralIDs: [UUID] = []
 
@@ -91,6 +94,10 @@ public final class CoreBluetoothCentral: NSObject, BLECentral, @unchecked Sendab
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                     queue.async {
+                        if let old = self.links.removeValue(forKey: id) {
+                            self.retiredDisconnects[id, default: 0] += 1
+                            old.didDisconnect(error: .linkLost(reason: "replaced by a new connection"))
+                        }
                         self.links[id] = link
                         self.connecting[id] = continuation
                         // Core Bluetooth connect requests never time out; the timeout lives in the caller.
@@ -195,6 +202,10 @@ extension CoreBluetoothCentral: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: (any Error)?) {
+        if let retired = retiredDisconnects[peripheral.identifier] {
+            retiredDisconnects[peripheral.identifier] = retired > 1 ? retired - 1 : nil
+            return
+        }
         connecting.removeValue(forKey: peripheral.identifier)?.resume(throwing: BLEError.connectFailed(reason: "disconnected while connecting"))
         // error == nil means we asked for it (cancelPeripheralConnection).
         let reason: BLEError = error.map(Self.map) ?? .linkLost(reason: "disconnected")
